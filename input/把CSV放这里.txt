@@ -1,0 +1,9 @@
+把新的两份 CSV 放到这个目录。
+
+推荐命名：
+- common.csv
+- timing.csv
+
+然后在当前文件夹执行：
+
+python3 build_dashboard_data.py --common input/common.csv --timing input/timing.csv --output data.js
