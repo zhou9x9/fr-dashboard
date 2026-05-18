@@ -477,6 +477,7 @@ function applyWorkspaceDefaults(workspaceKey) {
     });
     const recentVersions = defaultRecentVersionValues(versionRows);
     keepValidSelections("版本号", recentVersions.length ? recentVersions : defaultRecentVersionValues());
+    appState.compareValues = appState.filters["版本号"].slice();
   }
   if (workspaceKey === "cross_project") {
     keepValidSelections("报表日期", optionsFor("报表日期").slice(-1));
@@ -2923,6 +2924,10 @@ function buildControlSection() {
           });
           const recentVersions = defaultRecentVersionValues(versionRows);
           appState.filters["版本号"] = recentVersions.length ? recentVersions : defaultRecentVersionValues();
+          appState.compareValues = appState.filters["版本号"].slice();
+        }
+        if (appState.activeWorkspace === "version_iteration" && field === "版本号") {
+          appState.compareValues = appState.filters["版本号"].slice();
         }
         rerender();
       },
@@ -2937,6 +2942,10 @@ function buildControlSection() {
   const versionControl = document.querySelector("[data-control='version-filter']");
   if (versionControl) {
     versionControl.style.display = appState.analysisMode === "single_project" && !isPaidCountry ? "" : "none";
+  }
+  const compareValuesControl = document.querySelector("[data-control='compare-values']");
+  if (compareValuesControl) {
+    compareValuesControl.style.display = appState.activeWorkspace === "version_iteration" ? "none" : "";
   }
 
   renderMultiSelect(
