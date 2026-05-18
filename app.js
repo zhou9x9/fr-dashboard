@@ -2920,6 +2920,23 @@ function buildControlSection() {
         if (shouldResetCompareValues) {
           appState.compareValues = [];
         }
+        if (field === "项目代号" && appState.analysisMode === "single_project") {
+          const nextCountryUniverse = getCountryUniverse(appState.compareField, appState.compareValues, baseRowsForAnalysis());
+          if (appState.activeWorkspace === "version_iteration") {
+            appState.filters["国家"] = nextCountryUniverse.includes("全部") ? ["全部"] : nextCountryUniverse.slice(0, 1);
+            const versionRows = baseRowsForAnalysis().filter((row) => {
+              const selectedCountry = appState.filters["国家"]?.[0];
+              return !selectedCountry || selectedCountry === "全部" || row["国家"] === selectedCountry;
+            });
+            const recentVersions = defaultRecentVersionValues(versionRows);
+            appState.filters["版本号"] = recentVersions.length ? recentVersions : defaultRecentVersionValues();
+            appState.compareValues = appState.filters["版本号"].slice();
+          } else {
+            appState.filters["国家"] = nextCountryUniverse.length ? nextCountryUniverse.slice(0, 1) : [];
+            const availableVersions = optionsFor("版本号").filter((value) => value === "全部" || baseRowsForAnalysis().some((row) => row["版本号"] === value));
+            appState.filters["版本号"] = availableVersions.includes("全部") ? ["全部"] : availableVersions.slice(0, 1);
+          }
+        }
         if (appState.activeWorkspace === "version_iteration" && field === "国家") {
           const versionRows = baseRowsForAnalysis().filter((row) => {
             const selectedCountry = appState.filters["国家"]?.[0];
