@@ -282,6 +282,13 @@ function defaultRecentVersionValues(rows = dashboardData.main.rows) {
   return versions.slice(-2);
 }
 
+function versionOptionsForRows(rows) {
+  return sortDimensionValues(
+    "版本号",
+    uniqueValues(rows, "版本号").filter((value) => value !== "全部")
+  );
+}
+
 function topCountriesByUsers(rows) {
   const groups = new Map();
   rows.forEach((row) => {
@@ -453,15 +460,15 @@ function applyWorkspaceDefaults(workspaceKey) {
       keepValidSelections("项目代号", optionsFor("项目代号").filter((item) => item !== "全部"));
     }
     keepValidSelections("首次访问日期", optionsFor("首次访问日期").slice(-5));
-    const versions = optionsFor("版本号");
-    keepValidSelections("版本号", versions.includes("全部") ? ["全部"] : versions.slice(0, 1));
+    const versions = versionOptionsForRows(baseRowsForAnalysis());
+    keepValidSelections("版本号", versions.length ? versions : defaultRecentVersionValues());
   }
   if (workspaceKey === "country_opt") {
     const projects = optionsFor("项目代号");
     appState.filters["项目代号"] = projects.includes("FR07") ? ["FR07"] : projects.slice(0, 1);
     keepValidSelections("首次访问日期", optionsFor("首次访问日期").slice(-5));
-    const versions = optionsFor("版本号");
-    keepValidSelections("版本号", versions.includes("全部") ? ["全部"] : versions.slice(0, 1));
+    const versions = versionOptionsForRows(baseRowsForAnalysis());
+    keepValidSelections("版本号", versions.length ? versions.slice(0, 1) : defaultRecentVersionValues().slice(0, 1));
   }
   if (workspaceKey === "version_iteration") {
     const projects = optionsFor("项目代号");
@@ -483,7 +490,7 @@ function applyWorkspaceDefaults(workspaceKey) {
     keepValidSelections("报表日期", optionsFor("报表日期").slice(-1));
     keepValidSelections("项目代号", optionsFor("项目代号").filter((item) => item !== "全部"));
     keepValidSelections("首次访问日期", optionsFor("首次访问日期").slice(-5));
-    keepValidSelections("版本号", optionsFor("版本号"));
+    keepValidSelections("版本号", versionOptionsForRows(baseRowsForAnalysis()));
   }
   const compareDefaults = compareCandidateValues(baseRowsForAnalysis(), appState.compareField);
   appState.compareValues = compareDefaults.slice(0, appState.compareField === "国家" ? 5 : 3);
@@ -626,7 +633,7 @@ function visibleFilterFields(compareField) {
 }
 
 function getCountryUniverse(compareField, compareValues, rows) {
-  const actualCountries = sortDimensionValues("国家", uniqueValues(rows, "国家").filter((country) => country !== "全部"));
+  const actualCountries = topCountriesByUsers(rows).filter((country) => country !== "全部");
   if (appState.activeWorkspace === "version_iteration") {
     return ["全部", ...actualCountries];
   }
@@ -2881,7 +2888,14 @@ function buildControlSection() {
       controlBlock.style.display = shouldShow ? "" : "none";
     }
     if (!wrap || !shouldShow) continue;
-    const items = field === "国家" ? countryUniverse : optionsFor(field);
+    let items;
+    if (field === "国家") {
+      items = countryUniverse;
+    } else if (field === "版本号" && appState.analysisMode === "single_project") {
+      items = versionOptionsForRows(baseRowsForAnalysis());
+    } else {
+      items = optionsFor(field);
+    }
     const isSingleProjectField = field === "项目代号" && appState.analysisMode === "single_project";
     const isSingleCountryField = field === "国家" && appState.countryMode === "single_country";
     const selectedForControl = (isSingleProjectField || isSingleCountryField)
@@ -2933,8 +2947,8 @@ function buildControlSection() {
             appState.compareValues = appState.filters["版本号"].slice();
           } else {
             appState.filters["国家"] = nextCountryUniverse.length ? nextCountryUniverse.slice(0, 1) : [];
-            const availableVersions = optionsFor("版本号").filter((value) => value === "全部" || baseRowsForAnalysis().some((row) => row["版本号"] === value));
-            appState.filters["版本号"] = availableVersions.includes("全部") ? ["全部"] : availableVersions.slice(0, 1);
+            const availableVersions = versionOptionsForRows(baseRowsForAnalysis());
+            appState.filters["版本号"] = availableVersions.length ? availableVersions.slice(0, 1) : [];
           }
         }
         if (appState.activeWorkspace === "version_iteration" && field === "国家") {
