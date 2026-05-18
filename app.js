@@ -476,7 +476,7 @@ function applyWorkspaceDefaults(workspaceKey) {
       return !selectedCountry || selectedCountry === "全部" || row["国家"] === selectedCountry;
     });
     const recentVersions = defaultRecentVersionValues(versionRows);
-    keepValidSelections("版本号", recentVersions.length ? recentVersions : defaultRecentVersionValues());
+    appState.filters["版本号"] = recentVersions.length ? recentVersions : defaultRecentVersionValues();
     appState.compareValues = appState.filters["版本号"].slice();
   }
   if (workspaceKey === "cross_project") {
