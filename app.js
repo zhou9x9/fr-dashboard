@@ -1965,6 +1965,7 @@ function renderSingleProjectSummary(host, analysis) {
   const comparedSubjects = analysis.compareValues.length
     ? analysis.compareValues
     : optionsForRows(analysis.compareBaseRows, analysis.compareField);
+  const isVersionIteration = appState.activeWorkspace === "version_iteration" && compareLabel === "版本号";
   const qualityInsights = analysis.eligibleInsights.filter((item) => item.metric !== "新增用户数");
   const bestOpportunity = qualityInsights[0] || null;
   const retentionMetric = analysis.eligibleInsights.find((item) => ["D1留存率", "D2留存率"].includes(item.metric));
@@ -1972,6 +1973,30 @@ function renderSingleProjectSummary(host, analysis) {
   const comparisonContext = evaluateProjectComparisonContext(analysis);
   const eligibleSubjects = analysis.subjectSampleStats.filter((item) => isConclusionEligible(item.users));
   const excludedSubjects = analysis.subjectSampleStats.filter((item) => !isConclusionEligible(item.users));
+  const selectedDates = appState.filters["首次访问日期"]?.length
+    ? appState.filters["首次访问日期"].slice()
+    : optionsForRows(analysis.filteredRows, "首次访问日期");
+
+  const versionIterationChecks = isVersionIteration
+    ? comparedSubjects.map((subject) => {
+        const dateUsers = selectedDates.map((date) => {
+          const scopedRows = analysis.filteredRows.filter((row) => row["版本号"] === subject && row["首次访问日期"] === date);
+          const users = scopedRows.length
+            ? aggregateRows(scopedRows, ["新增用户数"])?.["新增用户数"] || 0
+            : 0;
+          return { date, users };
+        });
+        const minUsers = dateUsers.length ? Math.min(...dateUsers.map((item) => item.users)) : 0;
+        return {
+          subject,
+          dateUsers,
+          minUsers,
+          qualified: dateUsers.length > 0 && dateUsers.every((item) => item.users > 200),
+        };
+      })
+    : [];
+  const qualifiedVersionSubjects = versionIterationChecks.filter((item) => item.qualified);
+  const lowSampleVersionSubjects = versionIterationChecks.filter((item) => !item.qualified);
 
   const cards = [
     {
@@ -2034,6 +2059,41 @@ function renderSingleProjectSummary(host, analysis) {
     </tr>
   `).join("");
 
+  const versionSampleCards = isVersionIteration
+    ? `
+      <div class="narrative-block" style="margin-bottom: 18px;">
+        <h3>第一点：先排除样本量过少的版本</h3>
+        <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:18px; margin-top:14px;">
+          <div class="stat-card" style="padding:22px 24px;">
+            <div class="eyebrow">达标版本</div>
+            <div class="stat-title" style="font-size:22px; line-height:1.35; margin-bottom:10px;">${qualifiedVersionSubjects.length ? "可纳入结论" : "暂无达标版本"}</div>
+            <div class="muted" style="line-height:1.9;">
+              ${
+                qualifiedVersionSubjects.length
+                  ? qualifiedVersionSubjects.map((item) => `<div><strong>${item.subject}</strong>：每个首次访问日期新增用户数都 > 200</div>`).join("")
+                  : "当前没有版本在所选每个首次访问日期里都达到 200 新增用户门槛。"
+              }
+            </div>
+          </div>
+          <div class="stat-card" style="padding:22px 24px;">
+            <div class="eyebrow">待排除版本</div>
+            <div class="stat-title" style="font-size:22px; line-height:1.35; margin-bottom:10px;">${lowSampleVersionSubjects.length ? "样本不足" : "无"}</div>
+            <div class="muted" style="line-height:1.9;">
+              ${
+                lowSampleVersionSubjects.length
+                  ? lowSampleVersionSubjects.map((item) => {
+                      const weakDates = item.dateUsers.filter((point) => point.users <= 200);
+                      return `<div><strong>${item.subject}</strong>：${weakDates.map((point) => `${point.date} ${Math.round(point.users)}`).join("、")}</div>`;
+                    }).join("")
+                  : "当前所有版本在所选首次访问日期里的新增用户数都超过 200。"
+              }
+            </div>
+          </div>
+        </div>
+      </div>
+    `
+    : "";
+
   const noConclusionBlock = !qualityInsights.length
     ? `
       <div class="empty-state">
@@ -2044,6 +2104,7 @@ function renderSingleProjectSummary(host, analysis) {
 
   host.innerHTML = `
     <div class="${sampleAssessment.level === "high" ? "success-banner" : "warning-banner"}">${sampleAssessment.detail}</div>
+    ${versionSampleCards}
     <div class="stats-grid">
       ${cards.map((item) => `
         <div class="stat-card">
