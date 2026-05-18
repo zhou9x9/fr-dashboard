@@ -550,7 +550,7 @@ function renderWorkspaceChrome() {
 
   const sections = workspaceSections();
   const showCompare = appState.activeWorkspace !== "timing_special";
-  const showFunnel = appState.activeWorkspace === "version_iteration";
+  const showFunnel = false;
   const showTiming = appState.activeWorkspace === "timing_special";
   const showStructure = appState.activeWorkspace === "cross_project";
   const showCompareDetails = showCompare && appState.activeWorkspace !== "paid_country";
@@ -592,8 +592,6 @@ function renderWorkspaceChrome() {
     summaryDesc.textContent = "先判断这次版本对比是否样本充足，再看哪些指标出现了真实变化。";
     detailsTitle.textContent = "数据明细";
     detailsDesc.textContent = "根据当前筛选的首次访问日期和国家，直接查看所勾选版本号之间的数据差异。";
-    funnelTitle.textContent = "版本阶段漏斗";
-    funnelDesc.textContent = "把版本放进同一条阶段链路里观察，方便判断迭代影响主要落在哪个阶段。";
   } else if (appState.activeWorkspace === "cross_project") {
     compareControlsTitle.textContent = "多项目维护控制台";
     summaryTitle.textContent = "多项目维护速览";
