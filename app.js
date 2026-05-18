@@ -500,6 +500,9 @@ function applyWorkspaceDefaults(workspaceKey) {
     keepValidSelections("首次访问日期", optionsFor("首次访问日期").slice(-5));
     keepValidSelections("版本号", versionOptionsForRows(baseRowsForAnalysis()));
   }
+  if (workspaceKey === "version_iteration") {
+    return;
+  }
   const compareDefaults = compareCandidateValues(baseRowsForAnalysis(), appState.compareField);
   appState.compareValues = compareDefaults.slice(0, appState.compareField === "国家" ? 5 : 3);
 }
@@ -587,8 +590,8 @@ function renderWorkspaceChrome() {
     compareControlsTitle.textContent = "版本迭代控制台";
     summaryTitle.textContent = "迭代效果速览";
     summaryDesc.textContent = "先判断这次版本对比是否样本充足，再看哪些指标出现了真实变化。";
-    detailsTitle.textContent = "分版本分日明细";
-    detailsDesc.textContent = "重点看不同日期批次下，各版本的指标变化是否方向一致。";
+    detailsTitle.textContent = "数据明细";
+    detailsDesc.textContent = "根据当前筛选的首次访问日期和国家，直接查看所勾选版本号之间的数据差异。";
     funnelTitle.textContent = "版本阶段漏斗";
     funnelDesc.textContent = "把版本放进同一条阶段链路里观察，方便判断迭代影响主要落在哪个阶段。";
   } else if (appState.activeWorkspace === "cross_project") {
@@ -2005,6 +2008,147 @@ function renderSingleProjectSummary(host, analysis) {
     : [];
   const qualifiedVersionSubjects = versionIterationChecks.filter((item) => item.qualified);
   const lowSampleVersionSubjects = versionIterationChecks.filter((item) => !item.qualified);
+  const latestSelectedFirstVisitDate = selectedDates.length
+    ? selectedDates.slice().sort((a, b) => String(a).localeCompare(String(b), "zh-Hans-CN", { numeric: true })).slice(-1)[0]
+    : null;
+
+  if (isVersionIteration) {
+    const qualifiedSubjects = qualifiedVersionSubjects.map((item) => item.subject);
+    const metricInsights = sortCompareMetrics(analysis.compareMetrics.filter((metric) => metric !== "新增用户数"))
+      .map((metric) => {
+        const values = qualifiedSubjects.map((subject) => {
+          let rows = analysis.filteredRows.filter((row) => row["版本号"] === subject);
+          if (shouldExcludeLatestFirstVisit(metric) && latestSelectedFirstVisitDate) {
+            rows = rows.filter((row) => row["首次访问日期"] !== latestSelectedFirstVisitDate);
+          }
+          const value = rows.length ? aggregateRows(rows, [metric])?.[metric] : null;
+          return value === null || value === undefined || Number.isNaN(value) ? null : { subject, value };
+        }).filter(Boolean);
+        if (values.length < 2) {
+          return null;
+        }
+        const lowerBetter = metric.includes("卸载率");
+        const ranked = values.slice().sort((a, b) => lowerBetter ? a.value - b.value : b.value - a.value);
+        const best = ranked[0];
+        const worst = ranked[ranked.length - 1];
+        return {
+          metric,
+          best,
+          worst,
+          lowerBetter,
+          kind: dashboardData.metricMeta[metric]?.kind,
+          diff: Math.abs((best?.value || 0) - (worst?.value || 0)),
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.diff - a.diff);
+
+    const leadMap = new Map(qualifiedSubjects.map((subject) => [subject, []]));
+    const weakMap = new Map(qualifiedSubjects.map((subject) => [subject, []]));
+    metricInsights.forEach((item) => {
+      leadMap.get(item.best.subject)?.push(item.metric);
+      weakMap.get(item.worst.subject)?.push(item.metric);
+    });
+
+    const rankedVersions = qualifiedSubjects
+      .map((subject) => ({
+        subject,
+        leads: leadMap.get(subject) || [],
+        weak: weakMap.get(subject) || [],
+      }))
+      .sort((a, b) => {
+        if (b.leads.length !== a.leads.length) return b.leads.length - a.leads.length;
+        return a.weak.length - b.weak.length;
+      });
+
+    const bestVersion = rankedVersions[0] || null;
+    const weakVersion = rankedVersions.slice().sort((a, b) => {
+      if (b.weak.length !== a.weak.length) return b.weak.length - a.weak.length;
+      return a.leads.length - b.leads.length;
+    })[0] || null;
+
+    const metricCards = metricInsights.slice(0, 4).map((item) => `
+      <div class="stat-card">
+        <div class="eyebrow">关键指标差异</div>
+        <div class="stat-title">${item.metric}</div>
+        <div class="stat-value">${item.best.subject} 更优</div>
+        <div class="muted">
+          ${item.best.subject}：${formatMetric(item.metric, item.best.value)}<br/>
+          ${item.worst.subject}：${formatMetric(item.metric, item.worst.value)}<br/>
+          差异：${item.kind === "rate" ? `${(item.diff * 100).toFixed(2)} pct` : formatMetric(item.metric, item.diff)}
+        </div>
+      </div>
+    `).join("");
+
+    const secondStepBlock = qualifiedSubjects.length < 2
+      ? `
+        <div class="empty-state">
+          当前样本达标的版本不足 2 个，第二点暂时不输出版本优劣结论。
+        </div>
+      `
+      : `
+        <div class="stats-grid" style="margin-top:14px;">
+          <div class="stat-card">
+            <div class="eyebrow">综合判断</div>
+            <div class="stat-title">${bestVersion?.subject || "NA"}</div>
+            <div class="stat-value">当前更优</div>
+            <div class="muted">
+              领先指标数：${bestVersion?.leads.length || 0}<br/>
+              好在：${bestVersion?.leads.length ? bestVersion.leads.join("、") : "暂无明显领先指标"}
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="eyebrow">需要关注</div>
+            <div class="stat-title">${weakVersion?.subject || "NA"}</div>
+            <div class="stat-value">相对偏弱</div>
+            <div class="muted">
+              落后指标数：${weakVersion?.weak.length || 0}<br/>
+              主要短板：${weakVersion?.weak.length ? weakVersion.weak.join("、") : "暂无明显短板"}
+            </div>
+          </div>
+          ${metricCards}
+        </div>
+      `;
+
+    host.innerHTML = `
+      <div class="${sampleAssessment.level === "high" ? "success-banner" : "warning-banner"}">${sampleAssessment.detail}</div>
+      <div class="narrative-block" style="margin-bottom: 18px;">
+        <h3>第一点：先排除样本量过少的版本</h3>
+        <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:18px; margin-top:14px;">
+          <div class="stat-card" style="padding:22px 24px;">
+            <div class="eyebrow">达标版本</div>
+            <div class="stat-title" style="font-size:22px; line-height:1.35; margin-bottom:10px;">${qualifiedVersionSubjects.length ? "可纳入结论" : "暂无达标版本"}</div>
+            <div class="muted" style="line-height:1.9;">
+              ${
+                qualifiedVersionSubjects.length
+                  ? qualifiedVersionSubjects.map((item) => `<div><strong>${item.subject}</strong>：每个首次访问日期新增用户数都 > 200</div>`).join("")
+                  : "当前没有版本在所选每个首次访问日期里都达到 200 新增用户门槛。"
+              }
+            </div>
+          </div>
+          <div class="stat-card" style="padding:22px 24px;">
+            <div class="eyebrow">待排除版本</div>
+            <div class="stat-title" style="font-size:22px; line-height:1.35; margin-bottom:10px;">${lowSampleVersionSubjects.length ? "样本不足" : "无"}</div>
+            <div class="muted" style="line-height:1.9;">
+              ${
+                lowSampleVersionSubjects.length
+                  ? lowSampleVersionSubjects.map((item) => {
+                      const weakDates = item.dateUsers.filter((point) => point.users <= 200);
+                      return `<div><strong>${item.subject}</strong>：${weakDates.map((point) => `${point.date} ${Math.round(point.users)}`).join("、")}</div>`;
+                    }).join("")
+                  : "当前所有版本在所选首次访问日期里的新增用户数都超过 200。"
+              }
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="narrative-block">
+        <h3>第二点：再分析样本达标版本的数据差异</h3>
+        ${secondStepBlock}
+      </div>
+    `;
+    return;
+  }
 
   const cards = [
     {
