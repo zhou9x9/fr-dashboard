@@ -458,14 +458,14 @@ function applyWorkspaceDefaults(workspaceKey) {
   }
   if (workspaceKey === "country_opt") {
     const projects = optionsFor("项目代号");
-    keepValidSelections("项目代号", projects.includes("FR07") ? ["FR07"] : projects.slice(0, 1));
+    appState.filters["项目代号"] = projects.includes("FR07") ? ["FR07"] : projects.slice(0, 1);
     keepValidSelections("首次访问日期", optionsFor("首次访问日期").slice(-5));
     const versions = optionsFor("版本号");
     keepValidSelections("版本号", versions.includes("全部") ? ["全部"] : versions.slice(0, 1));
   }
   if (workspaceKey === "version_iteration") {
     const projects = optionsFor("项目代号");
-    keepValidSelections("项目代号", projects.includes("FR07") ? ["FR07"] : projects.slice(0, 1));
+    appState.filters["项目代号"] = projects.includes("FR07") ? ["FR07"] : projects.slice(0, 1);
     keepValidSelections("报表日期", optionsFor("报表日期").slice(-1));
     keepValidSelections("首次访问日期", optionsFor("首次访问日期").slice(-5));
     const countryOptions = getCountryUniverse("版本号", appState.compareValues, baseRowsForAnalysis());
@@ -2880,10 +2880,13 @@ function buildControlSection() {
     const items = field === "国家" ? countryUniverse : optionsFor(field);
     const isSingleProjectField = field === "项目代号" && appState.analysisMode === "single_project";
     const isSingleCountryField = field === "国家" && appState.countryMode === "single_country";
+    const selectedForControl = (isSingleProjectField || isSingleCountryField)
+      ? appState.filters[field].slice(0, 1)
+      : appState.filters[field];
     renderMultiSelect(
       wrap,
       items,
-      appState.filters[field],
+      selectedForControl,
       (value) => {
         if (isSingleProjectField || isSingleCountryField) {
           appState.filters[field] = value ? [value] : [];
@@ -2953,7 +2956,11 @@ function buildControlSection() {
 
   renderMultiSelect(
     document.querySelector("#group-dimensions"),
-    DIMENSION_LABELS.filter((field) => !["报表日期", appState.compareField].includes(field)),
+    DIMENSION_LABELS.filter((field) => {
+      if (["报表日期", appState.compareField].includes(field)) return false;
+      if (appState.analysisMode === "single_project" && field === "项目代号") return false;
+      return true;
+    }),
     appState.groupDimensions,
     (values) => {
       appState.groupDimensions = values;
