@@ -619,6 +619,9 @@ function activeFilterFields() {
 }
 
 function visibleFilterFields(compareField) {
+  if (appState.activeWorkspace === "version_iteration" && compareField === "版本号") {
+    return activeFilterFields();
+  }
   return activeFilterFields().filter((field) => field !== compareField);
 }
 
