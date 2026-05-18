@@ -3022,18 +3022,23 @@ function buildControlSection() {
   const compareFieldBlock = document.querySelector("[data-control='compare-field']");
   const analysisModeBlock = document.querySelector("[data-control='analysis-mode']");
   const countryModeBlock = document.querySelector("[data-control='country-mode']");
+  const compareFilterHeaderBlock = document.querySelector("[data-control='compare-filter-header']");
   const compareValuesBlock = document.querySelector("[data-control='compare-values']");
   const groupDimensionsBlock = document.querySelector("[data-control='group-dimensions']");
   const compareMetricsBlock = document.querySelector("[data-control='compare-metrics']");
   const compareValuesWrap = document.querySelector("#compare-values")?.closest(".control-block");
   const groupDimensionsWrap = document.querySelector("#group-dimensions")?.closest(".control-block");
   const compareMetricsWrap = document.querySelector("#compare-metrics")?.closest(".control-block");
+  const compareCountryLabel = document.querySelector("#compare-controls-panel [data-filter='国家']")?.closest(".control-block")?.querySelector("label");
   const isPaidCountry = appState.activeWorkspace === "paid_country";
   if (analysisModeBlock) {
     analysisModeBlock.style.display = "none";
   }
   if (compareFieldBlock) {
     compareFieldBlock.style.display = "none";
+  }
+  if (compareFilterHeaderBlock) {
+    compareFilterHeaderBlock.style.display = appState.activeWorkspace === "cross_project" ? "none" : "";
   }
   if (countryModeBlock) {
     countryModeBlock.style.display = "none";
@@ -3055,6 +3060,9 @@ function buildControlSection() {
   }
   if (compareMetricsWrap) {
     compareMetricsWrap.style.display = isPaidCountry ? "none" : "";
+  }
+  if (compareCountryLabel) {
+    compareCountryLabel.textContent = appState.activeWorkspace === "cross_project" ? "共有国家" : "国家";
   }
 
   const analysisModeSelect = document.querySelector("#analysis-mode");
