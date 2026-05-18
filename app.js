@@ -2943,7 +2943,7 @@ function buildControlSection() {
   if (versionControl) {
     versionControl.style.display = appState.analysisMode === "single_project" && !isPaidCountry ? "" : "none";
   }
-  const compareValuesControl = document.querySelector("[data-control='compare-values']");
+  const compareValuesControl = document.querySelector("#compare-values")?.closest(".control-block");
   if (compareValuesControl) {
     compareValuesControl.style.display = appState.activeWorkspace === "version_iteration" ? "none" : "";
   }
