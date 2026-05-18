@@ -289,6 +289,14 @@ function versionOptionsForRows(rows) {
   );
 }
 
+function versionFilterOptionsForWorkspace(rows) {
+  const versions = versionOptionsForRows(rows);
+  if (appState.activeWorkspace === "country_opt") {
+    return ["全部", ...versions];
+  }
+  return versions;
+}
+
 function topCountriesByUsers(rows) {
   const groups = new Map();
   rows.forEach((row) => {
@@ -467,8 +475,8 @@ function applyWorkspaceDefaults(workspaceKey) {
     const projects = optionsFor("项目代号");
     appState.filters["项目代号"] = projects.includes("FR07") ? ["FR07"] : projects.slice(0, 1);
     keepValidSelections("首次访问日期", optionsFor("首次访问日期").slice(-5));
-    const versions = versionOptionsForRows(baseRowsForAnalysis());
-    keepValidSelections("版本号", versions.length ? versions.slice(0, 1) : defaultRecentVersionValues().slice(0, 1));
+    const versions = versionFilterOptionsForWorkspace(baseRowsForAnalysis());
+    keepValidSelections("版本号", versions.includes("全部") ? ["全部"] : versions.slice(0, 1));
   }
   if (workspaceKey === "version_iteration") {
     const projects = optionsFor("项目代号");
@@ -2953,7 +2961,7 @@ function buildControlSection() {
     if (field === "国家") {
       items = countryUniverse;
     } else if (field === "版本号" && appState.analysisMode === "single_project") {
-      items = versionOptionsForRows(baseRowsForAnalysis());
+      items = versionFilterOptionsForWorkspace(baseRowsForAnalysis());
     } else {
       items = optionsFor(field);
     }
