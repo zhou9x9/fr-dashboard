@@ -2980,8 +2980,13 @@ function buildControlSection() {
         } else {
           let nextValues = value;
           if (field === "国家" || field === "版本号") {
+            const hadAllSelected = appState.filters[field].includes("全部");
             if (nextValues.includes("全部")) {
-              nextValues = ["全部"];
+              if (hadAllSelected && nextValues.length > 1) {
+                nextValues = nextValues.filter((item) => item !== "全部");
+              } else {
+                nextValues = ["全部"];
+              }
             } else {
               nextValues = nextValues.filter((item) => item !== "全部");
             }
