@@ -1477,37 +1477,60 @@ function renderCrossProjectSummary(host, analysis) {
       </div>
     `
     : `
+      <div class="stat-card" style="padding:22px 24px; margin-top:14px;">
+        <div class="eyebrow">综合结论</div>
+        <div class="stat-title" style="font-size:24px; line-height:1.35;">${bestProject?.project || "NA"} 当前更优</div>
+        <div class="muted" style="margin-top:10px; line-height:1.9;">
+          ${
+            bestProject?.leads.length
+              ? `主要好在：${bestProject.leads.join("、")}。`
+              : "当前没有形成特别明显的领先指标。"
+          }
+          ${
+            weakProject?.project
+              ? `<br/>${weakProject.project} 相对偏弱，主要短板是：${weakProject.weak.length ? weakProject.weak.join("、") : "暂无明显短板"}。`
+              : ""
+          }
+        </div>
+      </div>
       <div class="stats-grid" style="margin-top:14px;">
-        <div class="stat-card">
-          <div class="eyebrow">综合判断</div>
-          <div class="stat-title">${bestProject?.project || "NA"}</div>
-          <div class="stat-value">当前更优</div>
-          <div class="muted">
-            领先指标数：${bestProject?.leads.length || 0}<br/>
-            好在：${bestProject?.leads.length ? bestProject.leads.join("、") : "暂无明显领先指标"}
-          </div>
-        </div>
-        <div class="stat-card">
-          <div class="eyebrow">需要关注</div>
-          <div class="stat-title">${weakProject?.project || "NA"}</div>
-          <div class="stat-value">相对偏弱</div>
-          <div class="muted">
-            落后指标数：${weakProject?.weak.length || 0}<br/>
-            主要短板：${weakProject?.weak.length ? weakProject.weak.join("、") : "暂无明显短板"}
-          </div>
-        </div>
-        ${metricInsights.slice(0, 4).map((item) => `
+        ${rankedProjects.map((item) => `
           <div class="stat-card">
-            <div class="eyebrow">关键指标差异</div>
-            <div class="stat-title">${item.metric}</div>
-            <div class="stat-value">${item.best.project} 更优</div>
+            <div class="eyebrow">项目状态</div>
+            <div class="stat-title">${item.project}</div>
+            <div class="stat-value">${item.leads.length} 项领先 / ${item.weak.length} 项偏弱</div>
             <div class="muted">
-              ${item.best.project}：${formatMetric(item.metric, item.best.value)}<br/>
-              ${item.worst.project}：${formatMetric(item.metric, item.worst.value)}<br/>
-              差异：${item.kind === "rate" ? `${(item.diff * 100).toFixed(2)}%` : formatMetric(item.metric, item.diff)}
+              优势：${item.leads.length ? item.leads.join("、") : "暂无明显优势"}<br/>
+              短板：${item.weak.length ? item.weak.join("、") : "暂无明显短板"}
             </div>
           </div>
         `).join("")}
+      </div>
+      <div class="table-wrap" style="margin-top:16px;">
+        <table class="metric-table">
+          <thead>
+            <tr>
+              <th>指标</th>
+              <th>表现更好</th>
+              <th>当前值</th>
+              <th>需要关注</th>
+              <th>当前值</th>
+              <th>差异</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${metricInsights.slice(0, 6).map((item) => `
+              <tr>
+                <th>${item.metric}</th>
+                <td>${item.best.project}</td>
+                <td>${formatMetric(item.metric, item.best.value)}</td>
+                <td>${item.worst.project}</td>
+                <td>${formatMetric(item.metric, item.worst.value)}</td>
+                <td>${item.kind === "rate" ? `${(item.diff * 100).toFixed(2)}%` : formatMetric(item.metric, item.diff)}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
       </div>
     `;
 
@@ -2781,7 +2804,18 @@ function renderCompareDetails(analysis) {
       : "";
     summaryBlock = trendBlock;
   }
-  const cards = analysis.groups.slice(0, 18).map((group) => {
+  const detailGroups = appState.activeWorkspace === "cross_project"
+    ? analysis.groups.slice().sort((a, b) => {
+        const aDateLabel = a.labels.find((label) => label.startsWith("首次访问日期:")) || "";
+        const bDateLabel = b.labels.find((label) => label.startsWith("首次访问日期:")) || "";
+        const aDate = aDateLabel.split(":")[1]?.trim() || "";
+        const bDate = bDateLabel.split(":")[1]?.trim() || "";
+        const dateDiff = String(bDate).localeCompare(String(aDate), "zh-Hans-CN", { numeric: true });
+        if (dateDiff !== 0) return dateDiff;
+        return (b.strongestDiff?.diff || 0) - (a.strongestDiff?.diff || 0);
+      })
+    : analysis.groups;
+  const cards = detailGroups.slice(0, 18).map((group) => {
     const metricsForTable = metricsForSummary;
     const metricRows = metricsForTable.map((metric) => {
       const values = group.validSubjects.map((subject) => `
