@@ -3043,11 +3043,16 @@ function buildControlSection() {
   if (countryModeBlock) {
     countryModeBlock.style.display = "none";
   }
+  const shouldHideCompareValues = isPaidCountry || appState.activeWorkspace === "version_iteration" || appState.activeWorkspace === "cross_project";
   if (compareValuesBlock) {
-    compareValuesBlock.style.display = isPaidCountry || appState.activeWorkspace === "version_iteration" || appState.activeWorkspace === "cross_project" ? "none" : "";
+    compareValuesBlock.style.setProperty("display", shouldHideCompareValues ? "none" : "", shouldHideCompareValues ? "important" : "");
+    compareValuesBlock.hidden = shouldHideCompareValues;
+    compareValuesBlock.classList.toggle("hidden-panel", shouldHideCompareValues);
   }
-  if (compareValuesWrap) {
-    compareValuesWrap.style.display = isPaidCountry || appState.activeWorkspace === "version_iteration" || appState.activeWorkspace === "cross_project" ? "none" : "";
+  if (compareValuesWrap && compareValuesWrap !== compareValuesBlock) {
+    compareValuesWrap.style.setProperty("display", shouldHideCompareValues ? "none" : "", shouldHideCompareValues ? "important" : "");
+    compareValuesWrap.hidden = shouldHideCompareValues;
+    compareValuesWrap.classList.toggle("hidden-panel", shouldHideCompareValues);
   }
   if (groupDimensionsBlock) {
     groupDimensionsBlock.style.display = isPaidCountry || appState.activeWorkspace === "cross_project" ? "none" : "";
