@@ -3252,7 +3252,9 @@ function buildTimingOverview(rows, subjects, timingBreakdown) {
         ${firstStepBlock}
         <div class="narrative-block">
           <h3>第二点：数据结论</h3>
-          <div class="empty-state">当前没有可用于通知时机结论判断的样本。</div>
+          <div class="stat-card" style="padding:22px 24px; margin-top:14px;">
+            <div class="empty-state">当前没有可用于通知时机结论判断的样本。</div>
+          </div>
         </div>
       `,
     };
@@ -3353,7 +3355,9 @@ function buildTimingOverview(rows, subjects, timingBreakdown) {
       ${firstStepBlock}
       <div class="narrative-block">
         <h3>第二点：数据结论</h3>
-        ${secondStepBlock}
+        <div class="stat-card" style="padding:22px 24px; margin-top:14px;">
+          ${secondStepBlock}
+        </div>
       </div>
     `,
   };
