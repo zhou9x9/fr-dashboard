@@ -455,7 +455,7 @@ function ensureDefaults() {
     }
   }
   if (!appState.timingFirstVisitDate.length) {
-    appState.timingFirstVisitDate = timingOptionsFor("首次访问日期").slice(-1);
+    appState.timingFirstVisitDate = timingOptionsFor("首次访问日期").slice(-5);
   }
   if (!appState.timingReportDate.length && dashboardData.timing.dimensions.includes("报表日期")) {
     appState.timingReportDate = timingOptionsFor("报表日期").slice(-1);
@@ -1106,7 +1106,7 @@ function computeCompareAnalysis() {
 
   const rankedMetricInsights = overallMetricDiffs.map((item) => {
     const rankedSubjects = item.subjectValues.slice().sort((a, b) => {
-      const lowerBetter = item.metric === "卸载率_D1";
+      const lowerBetter = item.metric.includes("卸载率");
       return lowerBetter ? a.value - b.value : b.value - a.value;
     });
     const best = rankedSubjects[0] || null;
@@ -1215,7 +1215,7 @@ function buildEligibleInsights(rankedMetricInsights, subjectSampleStats) {
       const eligibleValues = item.subjectValues
         .filter((entry) => eligibleSubjects.has(entry.subject))
         .sort((a, b) => {
-          const lowerBetter = item.metric === "卸载率_D1";
+          const lowerBetter = item.metric.includes("卸载率");
           return lowerBetter ? a.value - b.value : b.value - a.value;
         });
       if (eligibleValues.length < 2) {
@@ -3194,6 +3194,171 @@ function computeTimingData() {
   return { rows, subjects, timingBreakdown, compareField };
 }
 
+function buildTimingOverview(rows, subjects, timingBreakdown) {
+  const selectedDates = appState.timingFirstVisitDate?.length
+    ? appState.timingFirstVisitDate.slice()
+    : timingOptionsFor("首次访问日期");
+  const dateProjectChecks = subjects.map((subject) => {
+    const dateUsers = selectedDates.map((date) => {
+      const subjectRows = rows.filter((row) => row["项目代号"] === subject.subject && row["首次访问日期"] === date);
+      const users = subjectRows.length ? (aggregateRows(subjectRows, ["新增用户数"])?.["新增用户数"] || 0) : 0;
+      return { date, users };
+    });
+    return {
+      subject: subject.subject,
+      dateUsers,
+      qualifiedDates: dateUsers.filter((item) => item.users > 200),
+      weakDates: dateUsers.filter((item) => item.users <= 200),
+    };
+  });
+
+  const qualifiedProjects = dateProjectChecks.filter((item) => item.qualifiedDates.length);
+  const excludedProjects = dateProjectChecks.filter((item) => !item.qualifiedDates.length);
+  const qualifiedDateMap = new Map(qualifiedProjects.map((item) => [item.subject, new Set(item.qualifiedDates.map((point) => point.date))]));
+
+  const firstStepBlock = `
+    <div class="narrative-block" style="margin-bottom:18px;">
+      <h3>第一点：先排除样本量过少的日期</h3>
+      <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:18px; margin-top:14px;">
+        <div class="stat-card" style="padding:22px 24px;">
+          <div class="eyebrow">纳入分析</div>
+          <div class="stat-title" style="font-size:22px; line-height:1.35; margin-bottom:10px;">${qualifiedProjects.length ? "可参与判断" : "暂无达标数据"}</div>
+          <div class="muted" style="line-height:1.9;">
+            ${
+              qualifiedProjects.length
+                ? qualifiedProjects.map((item) => `<div><strong>${item.subject}</strong>：${item.qualifiedDates.map((point) => point.date).join("、")}</div>`).join("")
+                : "当前所选项目在所选日期里都没有 > 200 的新增用户样本。"
+            }
+          </div>
+        </div>
+        <div class="stat-card" style="padding:22px 24px;">
+          <div class="eyebrow">已排除日期</div>
+          <div class="stat-title" style="font-size:22px; line-height:1.35; margin-bottom:10px;">${dateProjectChecks.some((item) => item.weakDates.length) ? "低样本日期已剔除" : "无"}</div>
+          <div class="muted" style="line-height:1.9;">
+            ${
+              dateProjectChecks.some((item) => item.weakDates.length)
+                ? dateProjectChecks.filter((item) => item.weakDates.length).map((item) => `<div><strong>${item.subject}</strong>：${item.weakDates.map((point) => `${point.date} ${Math.round(point.users)}`).join("、")}</div>`).join("")
+                : "当前所有所选日期都达到 200 新增用户门槛。"
+            }
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  if (qualifiedProjects.length === 0) {
+    return {
+      summaryHtml: `
+        ${firstStepBlock}
+        <div class="narrative-block">
+          <h3>第二点：数据结论</h3>
+          <div class="empty-state">当前没有可用于通知时机结论判断的样本。</div>
+        </div>
+      `,
+    };
+  }
+
+  const qualifiedRows = rows.filter((row) => qualifiedDateMap.get(row["项目代号"])?.has(row["首次访问日期"]));
+  const displayMetric = "D0展示用户率";
+  const clickMetric = "D0通知点击率";
+
+  let secondStepBlock = "";
+  if (qualifiedProjects.length === 1) {
+    const subject = qualifiedProjects[0].subject;
+    const timingValues = timingBreakdown
+      .map((item) => {
+        const subjectData = item.subjects.find((entry) => entry.subject === subject);
+        if (!subjectData?.aggregated) return null;
+        return {
+          timing: item.timing,
+          display: subjectData.aggregated[displayMetric],
+          click: subjectData.aggregated[clickMetric],
+        };
+      })
+      .filter(Boolean);
+
+    const displayRanked = timingValues.slice().sort((a, b) => (b.display || 0) - (a.display || 0));
+    const clickRanked = timingValues.slice().sort((a, b) => (b.click || 0) - (a.click || 0));
+    const bestDisplay = displayRanked[0] || null;
+    const weakDisplay = displayRanked[displayRanked.length - 1] || null;
+    const bestClick = clickRanked[0] || null;
+    const weakClick = clickRanked[clickRanked.length - 1] || null;
+
+    secondStepBlock = `
+      <div class="stats-grid" style="margin-top:14px;">
+        <div class="stat-card">
+          <div class="eyebrow">展示率更好</div>
+          <div class="stat-title">${bestDisplay?.timing || "NA"}</div>
+          <div class="stat-value">${bestDisplay ? formatMetric(displayMetric, bestDisplay.display) : "NA"}</div>
+          <div class="muted">相对偏弱：${weakDisplay?.timing || "NA"}（${weakDisplay ? formatMetric(displayMetric, weakDisplay.display) : "NA"}）</div>
+        </div>
+        <div class="stat-card">
+          <div class="eyebrow">点击率更好</div>
+          <div class="stat-title">${bestClick?.timing || "NA"}</div>
+          <div class="stat-value">${bestClick ? formatMetric(clickMetric, bestClick.click) : "NA"}</div>
+          <div class="muted">相对偏弱：${weakClick?.timing || "NA"}（${weakClick ? formatMetric(clickMetric, weakClick.click) : "NA"}）</div>
+        </div>
+      </div>
+    `;
+  } else {
+    const projectValues = qualifiedProjects.map((item) => {
+      const projectRows = qualifiedRows.filter((row) => row["项目代号"] === item.subject);
+      const aggregated = aggregateRows(projectRows, [displayMetric, clickMetric]);
+      return {
+        subject: item.subject,
+        display: aggregated?.[displayMetric],
+        click: aggregated?.[clickMetric],
+      };
+    }).filter((item) => item.display !== null || item.click !== null);
+
+    const bestDisplay = projectValues.slice().sort((a, b) => (b.display || 0) - (a.display || 0))[0] || null;
+    const bestClick = projectValues.slice().sort((a, b) => (b.click || 0) - (a.click || 0))[0] || null;
+    const rankedProjects = projectValues.map((item) => {
+      let leads = [];
+      if (bestDisplay && item.subject === bestDisplay.subject) leads.push("展示率");
+      if (bestClick && item.subject === bestClick.subject) leads.push("点击率");
+      return { ...item, leads };
+    }).sort((a, b) => b.leads.length - a.leads.length || (b.display || 0) - (a.display || 0));
+
+    secondStepBlock = `
+      <div class="stat-card" style="padding:22px 24px; margin-top:14px;">
+        <div class="eyebrow">综合结论</div>
+        <div class="stat-title" style="font-size:24px; line-height:1.35;">${rankedProjects[0]?.subject || "NA"} 当前更优</div>
+        <div class="muted" style="margin-top:10px; line-height:1.9;">
+          ${
+            rankedProjects[0]?.leads.length
+              ? `主要好在：${rankedProjects[0].leads.join("、")}。`
+              : "当前没有拉开明显的展示率 / 点击率差异。"
+          }
+        </div>
+      </div>
+      <div class="stats-grid" style="margin-top:14px;">
+        ${rankedProjects.map((item) => `
+          <div class="stat-card">
+            <div class="eyebrow">项目表现</div>
+            <div class="stat-title">${item.subject}</div>
+            <div class="stat-value">${item.leads.length ? `${item.leads.join(" / ")}领先` : "暂无明显领先"}</div>
+            <div class="muted">
+              展示率：${formatMetric(displayMetric, item.display)}<br/>
+              点击率：${formatMetric(clickMetric, item.click)}
+            </div>
+          </div>
+        `).join("")}
+      </div>
+    `;
+  }
+
+  return {
+    summaryHtml: `
+      ${firstStepBlock}
+      <div class="narrative-block">
+        <h3>第二点：数据结论</h3>
+        ${secondStepBlock}
+      </div>
+    `,
+  };
+}
+
 function renderTiming() {
   const host = document.querySelector("#timing-bars");
   const meta = document.querySelector("#timing-meta");
@@ -3257,7 +3422,9 @@ function renderTiming() {
       </article>
     `;
   }).join("");
+  const timingOverview = buildTimingOverview(rows, subjects, timingBreakdown);
   host.innerHTML = `
+    ${timingOverview.summaryHtml}
     <div class="panel-title">
       <div>
         <h2>所有通知时机总览</h2>
@@ -3276,7 +3443,7 @@ function renderTiming() {
   if (meta) {
     meta.innerHTML = `
       <div class="hint">
-        当前先用 6 张图看所有选中通知时机的分项目差异，再按每个细分通知时机拆开看全指标表。通知时机可多选，首次访问日期和国家都按单选取数。
+        当前先排除低样本日期，再看通知时机的展示率和点击率差异。首次访问日期支持多选，国家默认取全部，通知时机默认全选。
       </div>
     `;
   }
@@ -3702,7 +3869,7 @@ function buildControlSection() {
       timingOptionsFor(field),
       appState[stateKey],
       (values) => {
-        if (field === "首次访问日期" || field === "国家" || field === "报表日期") {
+        if (field === "国家" || field === "报表日期") {
           appState[stateKey] = values ? [values] : [];
         } else if (values.includes?.("全部")) {
           appState[stateKey] = ["全部"];
@@ -3712,10 +3879,12 @@ function buildControlSection() {
         rerender();
       },
       {
-        multiple: !["首次访问日期", "国家", "报表日期"].includes(field),
+        multiple: !["国家", "报表日期"].includes(field),
         size: field === "首次访问日期" ? 8 : 6,
         summary: field === "通知时机"
           ? (values) => values.length ? `已选 ${values.length} 个通知时机` : "请选择通知时机"
+          : field === "首次访问日期"
+          ? (values) => values.length ? `已选 ${values.length} 个首次访问日期` : "请选择首次访问日期"
           : null,
       }
     );
