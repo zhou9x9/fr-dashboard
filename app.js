@@ -3429,13 +3429,15 @@ function renderTiming() {
   const timingOverview = buildTimingOverview(rows, subjects, timingBreakdown);
   host.innerHTML = `
     ${timingOverview.summaryHtml}
-    <div class="panel-title" style="margin-top:20px;">
-      <div>
-        <h2>所有通知时机总览</h2>
-        <p class="muted">纵轴是通知时机，横轴是指标值，不同颜色代表不同项目。</p>
+    <div class="stat-card" style="padding:22px 24px; margin-top:20px;">
+      <div class="panel-title" style="margin-top:0;">
+        <div>
+          <h2>所有通知时机总览</h2>
+          <p class="muted">纵轴是通知时机，横轴是指标值，不同颜色代表不同项目。</p>
+        </div>
       </div>
+      <div class="${timingOverviewGridClass(timingBreakdown.length)}">${overviewCharts}</div>
     </div>
-    <div class="${timingOverviewGridClass(timingBreakdown.length)}">${overviewCharts}</div>
     <div class="panel-title">
       <div>
         <h2>细分通知时机对比</h2>
