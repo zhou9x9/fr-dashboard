@@ -3425,7 +3425,7 @@ function renderTiming() {
   const timingOverview = buildTimingOverview(rows, subjects, timingBreakdown);
   host.innerHTML = `
     ${timingOverview.summaryHtml}
-    <div class="panel-title">
+    <div class="panel-title" style="margin-top:20px;">
       <div>
         <h2>所有通知时机总览</h2>
         <p class="muted">纵轴是通知时机，横轴是指标值，不同颜色代表不同项目。</p>
@@ -3846,7 +3846,7 @@ function buildControlSection() {
       appState.timingCompareValues = values;
       rerender();
     },
-    { multiple: true, size: 6, summary: (values) => values.length ? `已选 ${values.length} 个项目` : "请选择项目" }
+    { multiple: true, size: 6, summary: (values) => values.length ? values.join("、") : "请选择项目" }
   );
 
   const timingControls = [
@@ -3884,7 +3884,7 @@ function buildControlSection() {
         summary: field === "通知时机"
           ? (values) => values.length ? `已选 ${values.length} 个通知时机` : "请选择通知时机"
           : field === "首次访问日期"
-          ? (values) => values.length ? `已选 ${values.length} 个首次访问日期` : "请选择首次访问日期"
+          ? (values) => values.length ? values.join("、") : "请选择首次访问日期"
           : null,
       }
     );
