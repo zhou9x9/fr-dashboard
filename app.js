@@ -394,6 +394,18 @@ function compareCandidateValues(rows, field) {
   return optionsForRows(rows, field).filter((value) => value !== "全部");
 }
 
+function shouldShowAggregateCompareValue(compareField = appState.compareField) {
+  return appState.activeWorkspace === "country_opt" && compareField === "国家";
+}
+
+function compareValueOptions(rows, compareField = appState.compareField) {
+  const values = compareCandidateValues(rows, compareField);
+  if (!shouldShowAggregateCompareValue(compareField)) {
+    return values;
+  }
+  return ["全部", ...values.filter((value) => value !== "全部")];
+}
+
 function timingOptionsFor(field) {
   return sortDimensionValues(field, uniqueValues(dashboardData.timing.rows, field));
 }
@@ -1007,7 +1019,7 @@ function computeCompareAnalysis() {
   const filteredRows = applyDimensionFilters(compareBaseRows, effectiveFilters);
   const compareMetrics = appState.compareMetrics.slice();
   const compareSourceRows = appState.activeWorkspace === "paid_country" ? filteredRows : compareBaseRows;
-  const compareCandidates = compareCandidateValues(compareSourceRows, compareField);
+  const compareCandidates = compareValueOptions(compareSourceRows, compareField);
   const compareValues = appState.activeWorkspace === "paid_country"
     ? compareCandidates.slice(0, 10)
     : (appState.compareValues.length
@@ -3464,6 +3476,7 @@ function buildControlSection() {
   const groupDimensionsBlock = document.querySelector("[data-control='group-dimensions']");
   const compareMetricsBlock = document.querySelector("[data-control='compare-metrics']");
   const compareValuesWrap = document.querySelector("#compare-values")?.closest(".control-block");
+  const compareValuesLabel = compareValuesBlock?.querySelector("label");
   const groupDimensionsWrap = document.querySelector("#group-dimensions")?.closest(".control-block");
   const compareMetricsWrap = document.querySelector("#compare-metrics")?.closest(".control-block");
   const compareCountryLabel = document.querySelector("#compare-controls-panel [data-filter='国家']")?.closest(".control-block")?.querySelector("label");
@@ -3490,6 +3503,9 @@ function buildControlSection() {
     compareValuesWrap.style.setProperty("display", shouldHideCompareValues ? "none" : "", shouldHideCompareValues ? "important" : "");
     compareValuesWrap.hidden = shouldHideCompareValues;
     compareValuesWrap.classList.toggle("hidden-panel", shouldHideCompareValues);
+  }
+  if (compareValuesLabel) {
+    compareValuesLabel.textContent = appState.activeWorkspace === "country_opt" ? "国家" : "参与对比的主体值";
   }
   if (groupDimensionsBlock) {
     groupDimensionsBlock.style.display = isPaidCountry || appState.activeWorkspace === "cross_project" ? "none" : "";
@@ -3683,7 +3699,7 @@ function buildControlSection() {
 
   renderMultiSelect(
     document.querySelector("#compare-values"),
-    compareCandidateValues(baseRowsForAnalysis(), appState.compareField),
+    compareValueOptions(baseRowsForAnalysis(), appState.compareField),
     appState.compareValues,
     (values) => {
       appState.compareValues = values;
@@ -3692,7 +3708,12 @@ function buildControlSection() {
     {
       multiple: true,
       size: 6,
-      summary: (values) => values.length ? `已选 ${values.length} 个${appState.compareField}` : `请选择${appState.compareField}`,
+      summary: (values) => {
+        if (shouldShowAggregateCompareValue()) {
+          return values.length ? values.join("、") : "请选择国家";
+        }
+        return values.length ? `已选 ${values.length} 个${appState.compareField}` : `请选择${appState.compareField}`;
+      },
     }
   );
 
