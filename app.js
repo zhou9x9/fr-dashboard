@@ -2828,6 +2828,26 @@ function renderCompareDetails(analysis) {
       })
     : analysis.groups;
   const cards = detailGroups.slice(0, 18).map((group) => {
+    const selectedContext = [];
+    const selectedCountry = appState.filters["国家"]?.length === 1 ? appState.filters["国家"][0] : null;
+    const selectedVersion = appState.filters["版本号"]?.length === 1 ? appState.filters["版本号"][0] : null;
+    if (
+      selectedCountry &&
+      selectedCountry !== "全部" &&
+      analysis.compareField !== "国家" &&
+      !group.labels.some((label) => label.startsWith("国家:"))
+    ) {
+      selectedContext.push(`国家：${selectedCountry}`);
+    }
+    if (
+      selectedVersion &&
+      selectedVersion !== "全部" &&
+      analysis.compareField !== "版本号" &&
+      !group.labels.some((label) => label.startsWith("版本号:"))
+    ) {
+      selectedContext.push(`版本号：${selectedVersion}`);
+    }
+    const titleSuffix = selectedContext.length ? `（${selectedContext.join("，")}）` : "";
     const metricsForTable = metricsForSummary;
     const metricRows = metricsForTable.map((metric) => {
       const values = group.validSubjects.map((subject) => `
@@ -2860,7 +2880,7 @@ function renderCompareDetails(analysis) {
       <article class="compare-card">
         <div class="compare-head">
           <div>
-            <div class="compare-title">${group.labels.length ? group.labels.join(" / ") : "全量分组"}</div>
+            <div class="compare-title">${group.labels.length ? group.labels.join(" / ") : "全量分组"}${titleSuffix}</div>
             <div class="muted">最明显差异：${group.strongestDiff?.metric || "NA"}</div>
           </div>
           <div class="pill">${analysis.compareField} 对比</div>
