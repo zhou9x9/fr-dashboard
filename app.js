@@ -487,7 +487,7 @@ function ensureDefaults() {
     appState.timingTiming = timingOptionsFor("通知时机").filter((item) => item !== "全部");
   }
   if (!appState.timingGroupDimensions.length) {
-    appState.timingGroupDimensions = ["首次访问日期", "国家", "版本号"]
+    appState.timingGroupDimensions = ["首次访问日期"]
       .filter((field) => dashboardData.timing.dimensions.includes(field));
   }
   if (!appState.timingCompareValues.length) {
@@ -3176,7 +3176,7 @@ function computeTimingData() {
     项目代号: [],
     首次访问日期: appState.timingFirstVisitDate,
     国家: appState.timingCountry,
-    版本号: [],
+    版本号: appState.timingVersion,
     通知时机: appState.timingTiming,
   };
   const rows = dashboardData.timing.rows.filter((row) =>
@@ -3963,6 +3963,7 @@ function buildControlSection() {
     ["#timing-report-date", "报表日期", "timingReportDate"],
     ["#timing-first-date", "首次访问日期", "timingFirstVisitDate"],
     ["#timing-country", "国家", "timingCountry"],
+    ["#timing-version", "版本号", "timingVersion"],
     ["#timing-event", "通知时机", "timingTiming"],
   ];
   for (const [selector, field, stateKey] of timingControls) {
@@ -3995,6 +3996,8 @@ function buildControlSection() {
           ? (values) => values.length ? `已选 ${values.length} 个通知时机` : "请选择通知时机"
           : field === "首次访问日期"
           ? (values) => values.length ? values.join("、") : "请选择首次访问日期"
+          : field === "版本号"
+          ? (values) => values.length ? values.join("、") : "请选择版本号"
           : null,
       }
     );
@@ -4006,7 +4009,7 @@ function buildControlSection() {
   }
   const timingVersionBlock = document.querySelector("[data-control='timing-version-filter']");
   if (timingVersionBlock) {
-    timingVersionBlock.style.display = "none";
+    timingVersionBlock.style.display = appState.timingGroupDimensions.includes("版本号") ? "" : "none";
   }
   const timingCompareFieldBlock = document.querySelector("[data-control='timing-compare-field']");
   if (timingCompareFieldBlock) {
