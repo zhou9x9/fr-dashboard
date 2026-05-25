@@ -572,6 +572,7 @@ function applyWorkspaceDefaults(workspaceKey) {
     const validProjects = (appState.filters["项目代号"] || []).filter((item) => allowedProjects.includes(item));
     appState.filters["项目代号"] = validProjects.length ? validProjects.slice(0, 2) : allowedProjects.slice(0, 2);
     keepValidSelections("首次访问日期", optionsFor("首次访问日期").slice(-5));
+    appState.filters["版本号"] = ["全部"];
     const sharedCountries = getCountryUniverse("项目代号", appState.filters["项目代号"], baseRowsForAnalysis());
     const rememberedCountries = (workspaceMemory["国家"] || []).filter((item) => sharedCountries.includes(item));
     appState.filters["国家"] = rememberedCountries.length
@@ -691,6 +692,9 @@ function baseRowsForAnalysis() {
     if (project) {
       rows = rows.filter((row) => row["项目代号"] === project);
     }
+  }
+  if (appState.activeWorkspace === "cross_project") {
+    rows = rows.filter((row) => row["版本号"] === "全部");
   }
   return rows;
 }
