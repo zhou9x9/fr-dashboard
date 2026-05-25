@@ -1053,19 +1053,21 @@ function computeCompareAnalysis() {
       aggregated[compareValue] = aggregateRows(group.compareData[compareValue], compareMetrics);
     }
     const validSubjects = Object.keys(aggregated);
-    if (validSubjects.length < 2) continue;
+    if (!validSubjects.length) continue;
 
     const metricDiffs = compareMetrics.map((metric) => {
-      const values = validSubjects.map((subject) => aggregated[subject][metric]).filter((value) => value !== null);
-      const min = Math.min(...values);
-      const max = Math.max(...values);
-      const diff = max - min;
+      const values = validSubjects
+        .map((subject) => aggregated[subject][metric])
+        .filter((value) => value !== null && value !== undefined && !Number.isNaN(Number(value)));
+      const min = values.length ? Math.min(...values) : null;
+      const max = values.length ? Math.max(...values) : null;
+      const diff = values.length >= 2 ? max - min : 0;
       return {
         metric,
         min,
         max,
         diff,
-        relativeDiff: min === 0 ? null : diff / Math.abs(min),
+        relativeDiff: min === null || min === 0 ? null : diff / Math.abs(min),
         kind: dashboardData.metricMeta[metric]?.kind,
       };
     });
@@ -1094,7 +1096,7 @@ function computeCompareAnalysis() {
       .map((subject) => filteredRows.filter((row) => row[compareField] === subject))
       .filter((rows) => rows.length);
     const aggregatedSubjects = subjectRows.map((rows) => aggregateRows(rows, [metric])[metric]);
-    if (aggregatedSubjects.length < 2) {
+    if (!aggregatedSubjects.length) {
       return null;
     }
     const min = Math.min(...aggregatedSubjects);
@@ -1103,7 +1105,7 @@ function computeCompareAnalysis() {
       metric,
       min,
       max,
-      diff: max - min,
+      diff: aggregatedSubjects.length >= 2 ? max - min : 0,
       kind: dashboardData.metricMeta[metric]?.kind,
       subjectValues: compareValues
         .map((subject) => ({
@@ -2531,7 +2533,7 @@ function renderSingleProjectSummary(host, analysis) {
   const noConclusionBlock = !qualityInsights.length
     ? `
       <div class="empty-state">
-        当前没有至少 2 个主体同时达到 ${MIN_CONCLUSION_SAMPLE} 新增用户的门槛，所以这里不输出优劣结论。下方明细仍可作为观察线索，但不建议据此判断谁更好。
+        当前达到样本门槛的主体较少，结论区先不做优劣判断；下方明细仍会按当前筛选结果直接展示。
       </div>
     `
     : "";
@@ -2613,7 +2615,7 @@ function renderCompareDetails(analysis) {
     return;
   }
   if (!analysis.groups.length) {
-    host.innerHTML = `<div class="empty-state">当前筛选下没有形成至少 2 个对比主体的分组。可以试试把“对比主体”改成“版本号”或减少维度筛选。</div>`;
+    host.innerHTML = `<div class="empty-state">当前筛选下没有数据明细。</div>`;
     return;
   }
   const selectedLatestFirstVisitDate = appState.filters["首次访问日期"]?.length
