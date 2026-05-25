@@ -194,7 +194,7 @@ const appState = {
   timingCountry: [],
   timingVersion: [],
   timingTiming: [],
-  timingGroupDimensions: ["首次访问日期", "国家", "版本号"],
+  timingGroupDimensions: ["首次访问日期"],
   hasInitializedPaidCountryProjects: false,
   countryOptTrendMetric: null,
   workspaceMemory: {},
