@@ -4009,7 +4009,7 @@ function buildControlSection() {
   }
   const timingVersionBlock = document.querySelector("[data-control='timing-version-filter']");
   if (timingVersionBlock) {
-    timingVersionBlock.style.display = appState.timingGroupDimensions.includes("版本号") ? "" : "none";
+    timingVersionBlock.style.display = "";
   }
   const timingCompareFieldBlock = document.querySelector("[data-control='timing-compare-field']");
   if (timingCompareFieldBlock) {
