@@ -194,6 +194,7 @@ const appState = {
   timingCountry: [],
   timingVersion: [],
   timingTiming: [],
+  timingGroupDimensions: ["首次访问日期", "国家", "版本号"],
   hasInitializedPaidCountryProjects: false,
   countryOptTrendMetric: null,
   workspaceMemory: {},
@@ -484,6 +485,10 @@ function ensureDefaults() {
   }
   if (!appState.timingTiming.length) {
     appState.timingTiming = timingOptionsFor("通知时机").filter((item) => item !== "全部");
+  }
+  if (!appState.timingGroupDimensions.length) {
+    appState.timingGroupDimensions = ["首次访问日期", "国家", "版本号"]
+      .filter((field) => dashboardData.timing.dimensions.includes(field));
   }
   if (!appState.timingCompareValues.length) {
     appState.timingCompareValues = compareCandidateValues(dashboardData.timing.rows, "项目代号").slice(0, 2);
@@ -3225,7 +3230,48 @@ function computeTimingData() {
       };
     })
     .filter((item) => item.subjects.length);
-  return { rows, subjects, timingBreakdown, compareField };
+  const detailDimensions = appState.timingGroupDimensions.filter((field) => dashboardData.timing.dimensions.includes(field));
+  const detailGroupMap = new Map();
+  rows.forEach((row) => {
+    const labels = [...detailDimensions.map((field) => `${field}: ${row[field] || "全部"}`), `通知时机: ${row["通知时机"] || "全部"}`];
+    const key = JSON.stringify(labels);
+    if (!detailGroupMap.has(key)) {
+      detailGroupMap.set(key, {
+        key,
+        labels,
+        projectRows: {},
+      });
+    }
+    const group = detailGroupMap.get(key);
+    const project = row["项目代号"];
+    if (!group.projectRows[project]) {
+      group.projectRows[project] = [];
+    }
+    group.projectRows[project].push(row);
+  });
+  const detailGroups = [...detailGroupMap.values()]
+    .map((group) => ({
+      ...group,
+      subjects: compareValues
+        .map((subject) => {
+          const projectRows = group.projectRows[subject] || [];
+          return {
+            subject,
+            rows: projectRows,
+            aggregated: projectRows.length ? aggregateRows(projectRows, dashboardData.timing.metrics) : null,
+          };
+        })
+        .filter((item) => item.aggregated),
+    }))
+    .filter((group) => group.subjects.length)
+    .sort((a, b) => {
+      const aDate = a.labels.find((label) => label.startsWith("首次访问日期:"))?.split(":")[1]?.trim() || "";
+      const bDate = b.labels.find((label) => label.startsWith("首次访问日期:"))?.split(":")[1]?.trim() || "";
+      const dateDiff = String(bDate).localeCompare(String(aDate), "zh-Hans-CN", { numeric: true });
+      if (dateDiff !== 0) return dateDiff;
+      return a.labels.join(" / ").localeCompare(b.labels.join(" / "), "zh-Hans-CN", { numeric: true });
+    });
+  return { rows, subjects, timingBreakdown, detailGroups, compareField };
 }
 
 function buildTimingOverview(rows, subjects, timingBreakdown) {
@@ -3400,7 +3446,7 @@ function buildTimingOverview(rows, subjects, timingBreakdown) {
 function renderTiming() {
   const host = document.querySelector("#timing-bars");
   const meta = document.querySelector("#timing-meta");
-  const { rows, subjects, timingBreakdown } = computeTimingData();
+  const { rows, subjects, timingBreakdown, detailGroups } = computeTimingData();
   if (!rows.length || !subjects.length) {
     host.innerHTML = `<div class="empty-state">通知时机区域当前没有数据。</div>`;
     if (meta) {
@@ -3427,7 +3473,7 @@ function renderTiming() {
     </article>
   `).join("");
 
-  const timingCards = timingBreakdown.map((group) => {
+  const timingCards = detailGroups.map((group) => {
     const metricRows = dashboardData.timing.metrics.map((metric) => `
       <tr>
         <th>${metric}</th>
@@ -3441,8 +3487,8 @@ function renderTiming() {
       <article class="compare-card">
         <div class="compare-head">
           <div>
-            <div class="compare-title">${group.timing}</div>
-            <div class="muted">细分通知时机的分项目指标对比</div>
+            <div class="compare-title">${group.labels.join(" / ")}</div>
+            <div class="muted">按所选维度拆开的分项目指标对比</div>
           </div>
           <div class="pill">细分时机</div>
         </div>
@@ -3475,7 +3521,7 @@ function renderTiming() {
     <div class="panel-title">
       <div>
         <h2>细分通知时机对比</h2>
-        <p class="muted">再拆到每个通知时机，看所有指标在不同项目之间的实际差异。</p>
+        <p class="muted">再按你选定的拆分维度，加上通知时机本身，查看不同项目之间的实际差异。</p>
       </div>
     </div>
     <div class="timing-detail-stack">${timingCards || '<div class="empty-state">当前通知时机筛选下没有细分数据。</div>'}</div>
@@ -3896,6 +3942,21 @@ function buildControlSection() {
       rerender();
     },
     { multiple: true, size: 6, summary: (values) => values.length ? values.join("、") : "请选择项目" }
+  );
+
+  renderMultiSelect(
+    document.querySelector("#timing-group-dimensions"),
+    ["首次访问日期", "国家", "版本号"].filter((field) => dashboardData.timing.dimensions.includes(field)),
+    appState.timingGroupDimensions,
+    (values) => {
+      appState.timingGroupDimensions = values.length ? values : ["首次访问日期"];
+      rerender();
+    },
+    {
+      multiple: true,
+      size: 5,
+      summary: (values) => values.length ? `已选 ${values.length} 个拆分维度` : "不拆分，直接看总表",
+    }
   );
 
   const timingControls = [
