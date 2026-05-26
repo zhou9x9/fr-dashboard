@@ -1933,21 +1933,18 @@ function renderCountryOptimizationSummary(host, analysis) {
         users: aggregateRows(dateRows, ["新增用户数"])?.["新增用户数"] || 0,
       };
     });
-    const totalUsers = dateUsers.reduce((sum, item) => sum + item.users, 0);
-    const avgUsersPerDate = selectedFirstVisitDates.length ? totalUsers / selectedFirstVisitDates.length : totalUsers;
-    const minUsersPerDate = dateUsers.length ? Math.min(...dateUsers.map((item) => item.users)) : 0;
-    const allDatesQualified = dateUsers.length > 0 && dateUsers.every((item) => item.users > sampleThreshold);
+    const qualifiedDates = dateUsers.filter((item) => item.users > sampleThreshold);
+    const weakDates = dateUsers.filter((item) => item.users <= sampleThreshold);
     return {
       country,
-      totalUsers,
-      avgUsersPerDate,
-      minUsersPerDate,
       dateUsers,
-      allDatesQualified,
+      qualifiedDates,
+      weakDates,
     };
   });
-  const qualifiedCountries = countryAverageRows.filter((item) => item.allDatesQualified);
-  const weakSampleCountries = countryAverageRows.filter((item) => !item.allDatesQualified);
+  const qualifiedCountries = countryAverageRows.filter((item) => item.qualifiedDates.length);
+  const weakSampleCountries = countryAverageRows.filter((item) => !item.qualifiedDates.length);
+  const qualifiedCountryDateMap = new Map(qualifiedCountries.map((item) => [item.country, new Set(item.qualifiedDates.map((point) => point.date))]));
 
   const benchmarkMetricOrder = [
     "D1留存率",
@@ -1975,24 +1972,21 @@ function renderCountryOptimizationSummary(host, analysis) {
   const benchmarkMetrics = benchmarkMetricOrder
     .filter((metric) => analysis.compareMetrics.includes(metric))
     .map((metric) => {
-      const metricRows = shouldExcludeLatestFirstVisit(metric) && selectedFirstVisitDates.length
-        ? benchmarkRows.filter((row) => row["首次访问日期"] !== selectedFirstVisitDates[selectedFirstVisitDates.length - 1])
-        : benchmarkRows;
+      const metricRows = benchmarkRows.filter((row) => {
+        const qualifiedDates = qualifiedCountryDateMap.get(row["国家"]);
+        if (!qualifiedDates?.has(row["首次访问日期"])) {
+          return false;
+        }
+        return !(shouldExcludeLatestFirstVisit(metric) && selectedFirstVisitDates.length && row["首次访问日期"] === selectedFirstVisitDates[selectedFirstVisitDates.length - 1]);
+      });
       const overall = aggregateRows(metricRows, [metric])?.[metric];
       const countryValues = qualifiedCountries.map((item) => {
-        const rows = compareRows.filter((row) => row["国家"] === item.country);
-        const dateMetricValues = selectedFirstVisitDates
-          .map((date) => {
-            if (shouldExcludeLatestFirstVisit(metric) && date === selectedFirstVisitDates[selectedFirstVisitDates.length - 1]) {
-              return null;
-            }
-            const dateRows = rows.filter((row) => row["首次访问日期"] === date);
-            return aggregateRows(dateRows, [metric])?.[metric];
-          })
-          .filter((value) => value !== null && value !== undefined);
-        const value = dateMetricValues.length
-          ? dateMetricValues.reduce((sum, current) => sum + current, 0) / dateMetricValues.length
-          : null;
+        const rows = compareRows.filter((row) =>
+          row["国家"] === item.country &&
+          qualifiedCountryDateMap.get(item.country)?.has(row["首次访问日期"]) &&
+          !(shouldExcludeLatestFirstVisit(metric) && selectedFirstVisitDates.length && row["首次访问日期"] === selectedFirstVisitDates[selectedFirstVisitDates.length - 1])
+        );
+        const value = rows.length ? aggregateRows(rows, [metric])?.[metric] : null;
         return { country: item.country, value, metric };
       }).filter((item) => item.value !== null && item.value !== undefined);
       const lowerBetter = metric === "卸载率_D0";
@@ -2012,14 +2006,16 @@ function renderCountryOptimizationSummary(host, analysis) {
   const selectedTrendBenchmark = benchmarkMetrics.find((item) => item.metric === selectedTrendMetric) || null;
   const trendDates = selectedFirstVisitDates
     .filter((date) => !(shouldExcludeLatestFirstVisit(selectedTrendMetric) && date === selectedFirstVisitDates[selectedFirstVisitDates.length - 1]));
-  const trendCountries = analysis.compareValues.filter((country) => {
+  const trendCountries = qualifiedCountries.map((item) => item.country).filter((country) => {
     const rows = compareRows.filter((row) => row["国家"] === country);
-    return trendDates.some((date) => rows.some((row) => row["首次访问日期"] === date));
+    return trendDates.some((date) => qualifiedCountryDateMap.get(country)?.has(date) && rows.some((row) => row["首次访问日期"] === date));
   });
   const trendSeries = trendCountries.map((country) => {
     const rows = compareRows.filter((row) => row["国家"] === country);
     const points = trendDates.map((date) => {
-      const dateRows = rows.filter((row) => row["首次访问日期"] === date);
+      const dateRows = qualifiedCountryDateMap.get(country)?.has(date)
+        ? rows.filter((row) => row["首次访问日期"] === date)
+        : [];
       return {
         date,
         value: dateRows.length ? aggregateRows(dateRows, [selectedTrendMetric])?.[selectedTrendMetric] : null,
@@ -2047,12 +2043,18 @@ function renderCountryOptimizationSummary(host, analysis) {
       <div class="empty-state">当前选中的指标还没有足够的数据，暂时无法输出横向对比结论。</div>
     `;
 
+  const formatQualifiedCountrySample = (item) => {
+    const qualifiedDateText = item.qualifiedDates.map((point) => `${point.date} ${Math.round(point.users).toLocaleString("zh-CN")}`).join("、");
+    return item.weakDates.length
+      ? `仅使用 ${qualifiedDateText} 进行分析`
+      : `所选日期全部 > ${sampleThreshold}（${qualifiedDateText}）`;
+  };
   const sampleConclusion = qualifiedCountries.length
-    ? `达标国家共 ${qualifiedCountries.length} 个：${qualifiedCountries.map((item) => `${item.country}（每天都超过 ${sampleThreshold}，日均新增 ${Math.round(item.avgUsersPerDate)}）`).join("、")}。`
-    : `当前没有国家达到“所选首次访问日期内，新增用户数每天都超过 ${sampleThreshold}”的门槛。`;
+    ? `达标国家共 ${qualifiedCountries.length} 个：${qualifiedCountries.map((item) => `${item.country}（${formatQualifiedCountrySample(item)}）`).join("、")}。`
+    : `当前没有国家在所选日期里留下可分析的样本。`;
   const weakConclusion = weakSampleCountries.length
-    ? `未达标国家共 ${weakSampleCountries.length} 个：${weakSampleCountries.map((item) => `${item.country}（最低单日新增 ${Math.round(item.minUsersPerDate)}，日均新增 ${Math.round(item.avgUsersPerDate)}）`).join("、")}。这些国家先作为线索，不建议直接拿来做强结论。`
-    : "当前参与对比的国家都达到样本门槛，可以继续看质量指标。";
+    ? `未达标国家共 ${weakSampleCountries.length} 个：${weakSampleCountries.map((item) => `${item.country}（${item.dateUsers.map((point) => `${point.date} ${Math.round(point.users).toLocaleString("zh-CN")}`).join("、")}）`).join("、")}。这些国家先作为线索，不建议直接拿来做强结论。`
+    : "当前参与对比的国家都至少有一部分日期可进入分析。";
   const formatSampleCountryList = (items, mode) => {
     if (!items.length) {
       return "";
@@ -2061,8 +2063,8 @@ function renderCountryOptimizationSummary(host, analysis) {
       <div style="display:flex; flex-direction:column; gap:6px; margin-top:10px;">
         ${items.map((item) => {
           const detail = mode === "qualified"
-            ? `每天都超过 ${sampleThreshold}，日均新增 ${Math.round(item.avgUsersPerDate)}`
-            : `最低单日新增 ${Math.round(item.minUsersPerDate)}，日均新增 ${Math.round(item.avgUsersPerDate)}`;
+            ? formatQualifiedCountrySample(item)
+            : item.dateUsers.map((point) => `${point.date} ${Math.round(point.users).toLocaleString("zh-CN")}`).join("、");
           return `<div><strong>${item.country}</strong>（${detail}）</div>`;
         }).join("")}
       </div>
@@ -2071,15 +2073,15 @@ function renderCountryOptimizationSummary(host, analysis) {
   const sampleCards = `
     <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; margin-top: 14px;">
       <div class="stat-card" style="padding: 22px 24px;">
-        <div class="eyebrow">达标国家</div>
-        <div class="stat-title" style="font-size:20px; line-height:1.35; margin-bottom:8px;">每天新增都大于 200</div>
+        <div class="eyebrow">纳入分析国家</div>
+        <div class="stat-title" style="font-size:20px; line-height:1.35; margin-bottom:8px;">至少一天新增大于 200</div>
         <div class="stat-value" style="font-size:16px; margin-top:0;">${qualifiedCountries.length} 个国家</div>
         <div class="muted" style="margin-top: 10px;">${qualifiedCountries.length ? `达标国家共 ${qualifiedCountries.length} 个。` : sampleConclusion}</div>
         ${formatSampleCountryList(qualifiedCountries, "qualified")}
       </div>
       <div class="stat-card" style="padding: 22px 24px;">
         <div class="eyebrow">待排除国家</div>
-        <div class="stat-title" style="font-size:20px; line-height:1.35; margin-bottom:8px;">至少一天新增未超过 200</div>
+        <div class="stat-title" style="font-size:20px; line-height:1.35; margin-bottom:8px;">所选日期都未超过 200</div>
         <div class="stat-value" style="font-size:16px; margin-top:0;">${weakSampleCountries.length} 个国家</div>
         <div class="muted" style="margin-top: 10px;">${weakSampleCountries.length ? `这些国家先作为线索，不建议直接拿来做强结论。` : weakConclusion}</div>
         ${formatSampleCountryList(weakSampleCountries, "weak")}
