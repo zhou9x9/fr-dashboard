@@ -3268,7 +3268,13 @@ function computeTimingData() {
         .filter((item) => item.aggregated),
     }))
     .filter((group) => group.subjects.length)
-    .sort((a, b) => a.labels.join(" / ").localeCompare(b.labels.join(" / "), "zh-Hans-CN", { numeric: true }));
+    .sort((a, b) => {
+      const aDate = a.labels.find((label) => label.startsWith("首次访问日期:"))?.split(":")[1]?.trim() || "";
+      const bDate = b.labels.find((label) => label.startsWith("首次访问日期:"))?.split(":")[1]?.trim() || "";
+      const dateDiff = String(bDate).localeCompare(String(aDate), "zh-Hans-CN", { numeric: true });
+      if (dateDiff !== 0) return dateDiff;
+      return a.labels.join(" / ").localeCompare(b.labels.join(" / "), "zh-Hans-CN", { numeric: true });
+    });
   return { rows, subjects, timingBreakdown, detailGroups, compareField };
 }
 
