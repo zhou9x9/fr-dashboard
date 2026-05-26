@@ -2290,17 +2290,20 @@ function renderSingleProjectSummary(host, analysis) {
             : 0;
           return { date, users };
         });
-        const minUsers = dateUsers.length ? Math.min(...dateUsers.map((item) => item.users)) : 0;
+        const qualifiedDates = dateUsers.filter((item) => item.users > 200);
+        const weakDates = dateUsers.filter((item) => item.users <= 200);
         return {
           subject,
           dateUsers,
-          minUsers,
-          qualified: dateUsers.length > 0 && dateUsers.every((item) => item.users > 200),
+          qualifiedDates,
+          weakDates,
+          qualified: qualifiedDates.length > 0,
         };
       })
     : [];
   const qualifiedVersionSubjects = versionIterationChecks.filter((item) => item.qualified);
   const lowSampleVersionSubjects = versionIterationChecks.filter((item) => !item.qualified);
+  const qualifiedVersionDateMap = new Map(qualifiedVersionSubjects.map((item) => [item.subject, new Set(item.qualifiedDates.map((point) => point.date))]));
   const latestSelectedFirstVisitDate = selectedDates.length
     ? selectedDates.slice().sort((a, b) => String(a).localeCompare(String(b), "zh-Hans-CN", { numeric: true })).slice(-1)[0]
     : null;
@@ -2310,7 +2313,9 @@ function renderSingleProjectSummary(host, analysis) {
     const metricInsights = sortCompareMetrics(analysis.compareMetrics.filter((metric) => metric !== "新增用户数"))
       .map((metric) => {
         const values = qualifiedSubjects.map((subject) => {
-          let rows = analysis.filteredRows.filter((row) => row["版本号"] === subject);
+          let rows = analysis.filteredRows.filter((row) =>
+            row["版本号"] === subject && qualifiedVersionDateMap.get(subject)?.has(row["首次访问日期"])
+          );
           if (shouldExcludeLatestFirstVisit(metric) && latestSelectedFirstVisitDate) {
             rows = rows.filter((row) => row["首次访问日期"] !== latestSelectedFirstVisitDate);
           }
@@ -2414,8 +2419,12 @@ function renderSingleProjectSummary(host, analysis) {
             <div class="muted" style="line-height:1.9;">
               ${
                 qualifiedVersionSubjects.length
-                  ? qualifiedVersionSubjects.map((item) => `<div><strong>${item.subject}</strong>：每个首次访问日期新增用户数都 > 200</div>`).join("")
-                  : "当前没有版本在所选每个首次访问日期里都达到 200 新增用户门槛。"
+                  ? qualifiedVersionSubjects.map((item) => {
+                      const allQualified = item.weakDates.length === 0;
+                      const qualifiedDateText = item.qualifiedDates.map((point) => `${point.date} ${Math.round(point.users).toLocaleString("zh-CN")}`).join("、");
+                      return `<div><strong>${item.subject}</strong>：${allQualified ? `所选日期全部 > 200（${qualifiedDateText}）` : `仅使用 ${qualifiedDateText} 进行分析`}</div>`;
+                    }).join("")
+                  : "当前没有版本在所选日期里留下可分析的样本。"
               }
             </div>
           </div>
@@ -2426,10 +2435,9 @@ function renderSingleProjectSummary(host, analysis) {
               ${
                 lowSampleVersionSubjects.length
                   ? lowSampleVersionSubjects.map((item) => {
-                      const weakDates = item.dateUsers.filter((point) => point.users <= 200);
-                      return `<div><strong>${item.subject}</strong>：${weakDates.map((point) => `${point.date} ${Math.round(point.users)}`).join("、")}</div>`;
+                      return `<div><strong>${item.subject}</strong>：${item.dateUsers.map((point) => `${point.date} ${Math.round(point.users).toLocaleString("zh-CN")}`).join("、")}</div>`;
                     }).join("")
-                  : "当前所有版本在所选首次访问日期里的新增用户数都超过 200。"
+                  : "当前所选版本都至少有一部分日期可进入分析。"
               }
             </div>
           </div>
@@ -2515,8 +2523,12 @@ function renderSingleProjectSummary(host, analysis) {
             <div class="muted" style="line-height:1.9;">
               ${
                 qualifiedVersionSubjects.length
-                  ? qualifiedVersionSubjects.map((item) => `<div><strong>${item.subject}</strong>：每个首次访问日期新增用户数都 > 200</div>`).join("")
-                  : "当前没有版本在所选每个首次访问日期里都达到 200 新增用户门槛。"
+                  ? qualifiedVersionSubjects.map((item) => {
+                      const allQualified = item.weakDates.length === 0;
+                      const qualifiedDateText = item.qualifiedDates.map((point) => `${point.date} ${Math.round(point.users).toLocaleString("zh-CN")}`).join("、");
+                      return `<div><strong>${item.subject}</strong>：${allQualified ? `所选日期全部 > 200（${qualifiedDateText}）` : `仅使用 ${qualifiedDateText} 进行分析`}</div>`;
+                    }).join("")
+                  : "当前没有版本在所选日期里留下可分析的样本。"
               }
             </div>
           </div>
@@ -2527,10 +2539,9 @@ function renderSingleProjectSummary(host, analysis) {
               ${
                 lowSampleVersionSubjects.length
                   ? lowSampleVersionSubjects.map((item) => {
-                      const weakDates = item.dateUsers.filter((point) => point.users <= 200);
-                      return `<div><strong>${item.subject}</strong>：${weakDates.map((point) => `${point.date} ${Math.round(point.users)}`).join("、")}</div>`;
+                      return `<div><strong>${item.subject}</strong>：${item.dateUsers.map((point) => `${point.date} ${Math.round(point.users).toLocaleString("zh-CN")}`).join("、")}</div>`;
                     }).join("")
-                  : "当前所有版本在所选首次访问日期里的新增用户数都超过 200。"
+                  : "当前所选版本都至少有一部分日期可进入分析。"
               }
             </div>
           </div>
