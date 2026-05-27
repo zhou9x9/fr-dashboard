@@ -3491,7 +3491,8 @@ function renderTiming() {
   `).join("");
 
   const timingCards = detailGroups.map((group) => {
-    const metricRows = dashboardData.timing.metrics.map((metric) => `
+    const detailMetrics = dashboardData.timing.metrics.filter((metric) => !metric.startsWith("D2"));
+    const metricRows = detailMetrics.map((metric) => `
       <tr>
         <th>${metric}</th>
         ${subjects.map((subject) => {
@@ -3999,6 +4000,17 @@ function buildControlSection() {
       (values) => {
         if (field === "国家" || field === "报表日期") {
           appState[stateKey] = values ? [values] : [];
+        } else if (field === "版本号") {
+          let nextValues = values;
+          const hadAllSelected = appState[stateKey].includes("全部");
+          if (nextValues.includes?.("全部")) {
+            nextValues = hadAllSelected && nextValues.length > 1
+              ? nextValues.filter((item) => item !== "全部")
+              : ["全部"];
+          } else {
+            nextValues = nextValues.filter((item) => item !== "全部");
+          }
+          appState[stateKey] = nextValues.length ? nextValues : ["全部"];
         } else if (values.includes?.("全部")) {
           appState[stateKey] = ["全部"];
         } else {
