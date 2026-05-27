@@ -407,7 +407,81 @@ function compareValueOptions(rows, compareField = appState.compareField) {
   return ["全部", ...values.filter((value) => value !== "全部")];
 }
 
+function selectedTimingProjects() {
+  const projects = compareCandidateValues(dashboardData.timing.rows, "项目代号");
+  const selected = appState.timingCompareValues.filter((project) => projects.includes(project));
+  return selected.length ? selected : projects;
+}
+
+function timingRowsForCountryOptions() {
+  const selectedProjects = selectedTimingProjects();
+  const filters = {
+    项目代号: selectedProjects,
+    报表日期: appState.timingReportDate,
+    首次访问日期: appState.timingFirstVisitDate,
+    版本号: appState.timingVersion,
+  };
+  return dashboardData.timing.rows.filter((row) =>
+    Object.entries(filters).every(([filterField, allowed]) => {
+      if (!dashboardData.timing.dimensions.includes(filterField) || !allowed.length) {
+        return true;
+      }
+      if (isAggregateSelection(allowed)) {
+        return row[filterField] === "全部";
+      }
+      return allowed.includes(row[filterField]);
+    })
+  );
+}
+
+function commonCountriesForTimingProjects(rows, projects) {
+  const projectCountrySets = projects.map((project) => new Set(
+    rows
+      .filter((row) => row["项目代号"] === project)
+      .map((row) => row["国家"])
+      .filter((country) => country && country !== "全部")
+  ));
+  if (!projectCountrySets.length) {
+    return new Set();
+  }
+  return projectCountrySets.reduce((commonSet, projectSet) =>
+    new Set([...commonSet].filter((country) => projectSet.has(country)))
+  );
+}
+
+function sortTimingCountriesByUsers(rows, allowedCountries) {
+  const countryUsers = new Map();
+  const seenCohorts = new Set();
+  rows.forEach((row) => {
+    const country = row["国家"];
+    if (!country || country === "全部" || !allowedCountries.has(country)) {
+      return;
+    }
+    const cohortKey = ["项目代号", "报表日期", "首次访问日期", "国家", "版本号"]
+      .map((key) => row[key] || "")
+      .join("|");
+    if (seenCohorts.has(cohortKey)) {
+      return;
+    }
+    seenCohorts.add(cohortKey);
+    countryUsers.set(country, (countryUsers.get(country) || 0) + Number(row["新增用户数"] || 0));
+  });
+  return [...countryUsers.entries()]
+    .sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0]), "zh-Hans-CN"))
+    .map(([country]) => country);
+}
+
+function timingCountryOptions() {
+  const rows = timingRowsForCountryOptions();
+  const projects = selectedTimingProjects();
+  const countries = commonCountriesForTimingProjects(rows, projects);
+  return ["全部", ...sortTimingCountriesByUsers(rows, countries)];
+}
+
 function timingOptionsFor(field) {
+  if (field === "国家") {
+    return timingCountryOptions();
+  }
   return sortDimensionValues(field, uniqueValues(dashboardData.timing.rows, field));
 }
 
@@ -3993,9 +4067,13 @@ function buildControlSection() {
       block.style.display = shouldShow ? "" : "none";
     }
     if (!shouldShow) continue;
+    const timingItems = timingOptionsFor(field);
+    if (field === "国家" && !appState[stateKey].every((value) => timingItems.includes(value))) {
+      appState[stateKey] = timingItems.includes("全部") ? ["全部"] : timingItems.slice(0, 1);
+    }
     renderMultiSelect(
       node,
-      timingOptionsFor(field),
+      timingItems,
       appState[stateKey],
       (values) => {
         if (field === "国家" || field === "报表日期") {
