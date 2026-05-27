@@ -158,6 +158,10 @@ const WORKSPACES = {
     label: "通知时机专项",
     note: "固定日期和国家后，对比同一批通知时机在不同项目上的表现，适合专门观察触达质量与点击差异。",
   },
+  feature_module: {
+    label: "功能模块",
+    note: "按分析类型查看首次启动流程漏斗和首页模块点击率，适合判断新用户启动链路与首页功能入口表现。",
+  },
 };
 
 const appState = {
@@ -195,6 +199,16 @@ const appState = {
   timingVersion: [],
   timingTiming: [],
   timingGroupDimensions: ["首次访问日期"],
+  featureReportDate: [],
+  featureProject: [],
+  featureFirstVisitDate: [],
+  featureCountry: [],
+  featureVersion: [],
+  featureAnalysisType: [],
+  featureDays: ["D0"],
+  featureColumnDimension: ["项目代号"],
+  featureGroupDimensions: ["首次访问日期"],
+  lastFeatureWorkspace: null,
   hasInitializedPaidCountryProjects: false,
   countryOptTrendMetric: null,
   workspaceMemory: {},
@@ -485,6 +499,105 @@ function timingOptionsFor(field) {
   return sortDimensionValues(field, uniqueValues(dashboardData.timing.rows, field));
 }
 
+function isFeatureWorkspace() {
+  return appState.activeWorkspace === "feature_module";
+}
+
+function featureRows() {
+  return dashboardData.feature?.rows || [];
+}
+
+function featureMetrics() {
+  return dashboardData.feature?.metrics || [];
+}
+
+function featureOptionsFor(field) {
+  const values = uniqueValues(featureRows(), field);
+  if (field === "国家") {
+    return featureCountryOptions();
+  }
+  if (field === "国家" || field === "版本号") {
+    const allValues = values.includes("全部") ? ["全部"] : [];
+    const others = values
+      .filter((value) => value !== "全部")
+      .sort((a, b) => String(a).localeCompare(String(b), "zh-Hans-CN", { numeric: true }));
+    return [...allValues, ...others];
+  }
+  return sortDimensionValues(field, values);
+}
+
+function featureRowsForCountryOptions() {
+  const filters = {
+    报表日期: appState.featureReportDate,
+    项目代号: appState.featureProject,
+    首次访问日期: appState.featureFirstVisitDate,
+    版本号: appState.featureVersion,
+    分析类型: appState.featureAnalysisType,
+  };
+  return featureRows().filter((row) =>
+    Object.entries(filters).every(([field, allowed]) => {
+      if (!allowed?.length) return true;
+      if (isAggregateSelection(allowed)) return row[field] === "全部";
+      return allowed.includes(row[field]);
+    })
+  );
+}
+
+function featureCountryOptions() {
+  const rows = featureRowsForCountryOptions();
+  const countryUsers = new Map();
+  const seenCohorts = new Set();
+  rows.forEach((row) => {
+    const country = row["国家"];
+    if (!country || country === "全部") return;
+    const cohortKey = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号"]
+      .map((field) => row[field] || "")
+      .join("|");
+    if (seenCohorts.has(cohortKey)) return;
+    seenCohorts.add(cohortKey);
+    countryUsers.set(country, (countryUsers.get(country) || 0) + Number(row["新增用户数"] || 0));
+  });
+  const countries = [...countryUsers.entries()]
+    .sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0]), "zh-Hans-CN"))
+    .map(([country]) => country);
+  return featureRows().some((row) => row["国家"] === "全部") ? ["全部", ...countries] : countries;
+}
+
+function applyFeatureDefaults(workspaceKey = appState.activeWorkspace) {
+  const rows = featureRows();
+  if (!rows.length) return;
+  const keepValid = (stateKey, field, fallback) => {
+    const allowed = featureOptionsFor(field);
+    const kept = (appState[stateKey] || []).filter((value) => allowed.includes(value));
+    appState[stateKey] = kept.length ? kept : fallback.filter((value) => allowed.includes(value));
+  };
+  keepValid("featureReportDate", "报表日期", featureOptionsFor("报表日期").slice(-1));
+  keepValid("featureProject", "项目代号", featureOptionsFor("项目代号").slice(0, 1));
+  keepValid("featureFirstVisitDate", "首次访问日期", featureOptionsFor("首次访问日期").slice(-5));
+  keepValid("featureCountry", "国家", featureOptionsFor("国家").includes("全部") ? ["全部"] : featureOptionsFor("国家").slice(0, 1));
+  keepValid("featureVersion", "版本号", featureOptionsFor("版本号").includes("全部") ? ["全部"] : featureOptionsFor("版本号").slice(0, 1));
+  const analysisTypes = featureOptionsFor("分析类型");
+  const currentTypes = (appState.featureAnalysisType || []).filter((value) => analysisTypes.includes(value));
+  appState.featureAnalysisType = currentTypes.length
+    ? currentTypes
+    : analysisTypes.slice(0, 1);
+  appState.featureDays = (appState.featureDays || []).filter((day) => featureMetrics().includes(day));
+  if (!appState.featureDays.length) {
+    appState.featureDays = featureMetrics().includes("D0") ? ["D0"] : featureMetrics().filter((metric) => /^D\d+$/.test(metric)).slice(0, 1);
+  }
+  appState.featureColumnDimension = (appState.featureColumnDimension || [])
+    .filter((field) => ["项目代号", "版本号", "国家"].includes(field));
+  if (!appState.featureColumnDimension.length) {
+    appState.featureColumnDimension = ["项目代号"];
+  }
+  appState.lastFeatureWorkspace = workspaceKey;
+  appState.featureGroupDimensions = (appState.featureGroupDimensions || [])
+    .filter((field) => ["首次访问日期", "国家", "版本号", "分析类型"].includes(field));
+  if (!appState.featureGroupDimensions.length) {
+    appState.featureGroupDimensions = ["首次访问日期"];
+  }
+}
+
 function timingAvailableCompareFields() {
   return ["项目代号"];
 }
@@ -575,6 +688,10 @@ function filteredMetrics(metrics) {
 
 function applyWorkspaceDefaults(workspaceKey) {
   const workspace = WORKSPACES[workspaceKey];
+  if (workspaceKey === "feature_module") {
+    applyFeatureDefaults(workspaceKey);
+    return;
+  }
   if (!workspace?.compareDefaults) {
     return;
   }
@@ -666,11 +783,13 @@ function workspaceSections() {
     compareControls: document.querySelector("#compare-controls-panel"),
     funnelControls: document.querySelector("#funnel-controls-panel"),
     timingControls: document.querySelector("#timing-controls-panel"),
+    featureControls: document.querySelector("#feature-controls-panel"),
     compareSummary: document.querySelector("#compare-summary-panel"),
     compareDetails: document.querySelector("#compare-details-panel"),
     structure: document.querySelector("#country-structure-panel"),
     funnelResult: document.querySelector("#funnel-result-panel"),
     timingResult: document.querySelector("#timing-result-panel"),
+    featureResult: document.querySelector("#feature-result-panel"),
   };
 }
 
@@ -704,7 +823,8 @@ function renderWorkspaceChrome() {
   }
 
   const sections = workspaceSections();
-  const showCompare = appState.activeWorkspace !== "timing_special";
+  const showFeature = isFeatureWorkspace();
+  const showCompare = appState.activeWorkspace !== "timing_special" && !showFeature;
   const showFunnel = false;
   const showTiming = appState.activeWorkspace === "timing_special";
   const showStructure = appState.activeWorkspace === "cross_project";
@@ -717,6 +837,8 @@ function renderWorkspaceChrome() {
   setHidden(sections.funnelResult, !showFunnel);
   setHidden(sections.timingControls, !showTiming);
   setHidden(sections.timingResult, !showTiming);
+  setHidden(sections.featureControls, !showFeature);
+  setHidden(sections.featureResult, !showFeature);
   setHidden(sections.structure, !showStructure);
 
   const compareControlsTitle = document.querySelector("#compare-controls-title");
@@ -728,6 +850,8 @@ function renderWorkspaceChrome() {
   const funnelDesc = document.querySelector("#funnel-desc");
   const timingTitle = document.querySelector("#timing-title");
   const timingDesc = document.querySelector("#timing-desc");
+  const featureTitle = document.querySelector("#feature-title");
+  const featureDesc = document.querySelector("#feature-desc");
 
   if (appState.activeWorkspace === "paid_country") {
     compareControlsTitle.textContent = "买量国家对比控制台";
@@ -756,6 +880,9 @@ function renderWorkspaceChrome() {
   } else if (appState.activeWorkspace === "timing_special") {
     timingTitle.textContent = "通知时机专项";
     timingDesc.textContent = "固定日期和国家后，对比相同通知时机在不同项目上的展示与点击表现。";
+  } else if (appState.activeWorkspace === "feature_module") {
+    if (featureTitle) featureTitle.textContent = "功能模块";
+    if (featureDesc) featureDesc.textContent = "按分析类型查看首次启动流程漏斗和首页模块点击率。";
   }
 }
 
@@ -3627,7 +3754,538 @@ function renderTiming() {
   }
 }
 
+function featureFilterRows() {
+  const filters = {
+    报表日期: appState.featureReportDate,
+    项目代号: appState.featureProject,
+    首次访问日期: appState.featureFirstVisitDate,
+    国家: appState.featureCountry,
+    版本号: appState.featureVersion,
+    分析类型: appState.featureAnalysisType,
+  };
+  return featureRows().filter((row) =>
+    Object.entries(filters).every(([field, allowed]) => {
+      if (!allowed?.length) return true;
+      if (isAggregateSelection(allowed)) return row[field] === "全部";
+      return allowed.includes(row[field]);
+    })
+  );
+}
+
+function featureGroupKey(row, fields) {
+  const actualFields = fields.length ? fields : ["分析类型"];
+  const labels = actualFields.map((field) => `${field}: ${row[field] || "全部"}`);
+  const key = actualFields.map((field) => row[field] || "").join("|");
+  return { key, labels };
+}
+
+function aggregateFeatureObjectRows(rows) {
+  const byObject = new Map();
+  rows.forEach((row) => {
+    const object = row["分析对象"];
+    if (object === "新增用户") return;
+    if (!byObject.has(object)) {
+      byObject.set(object, []);
+    }
+    byObject.get(object).push(row);
+  });
+  return [...byObject.entries()].map(([object, objectRows]) => {
+    const users = objectRows.reduce((sum, row) => sum + Number(row["新增用户数"] || 0), 0);
+    const result = { object, users };
+    featureMetrics().filter((metric) => metric !== "新增用户数").forEach((metric) => {
+      let weighted = 0;
+      let weight = 0;
+      objectRows.forEach((row) => {
+        const value = Number(row[metric]);
+        const rowUsers = Number(row["新增用户数"] || 0);
+        if (Number.isNaN(value)) return;
+        weighted += value * (rowUsers || 1);
+        weight += rowUsers || 1;
+      });
+      result[metric] = weight ? weighted / weight : null;
+    });
+    return result;
+  });
+}
+
+function featureSelectedDays() {
+  const days = (appState.featureDays || []).filter((day) => featureMetrics().includes(day));
+  return days.length ? days : ["D0"].filter((day) => featureMetrics().includes(day));
+}
+
+function featureUsersForRows(rows) {
+  const seen = new Set();
+  let users = 0;
+  rows.forEach((row) => {
+    const key = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号", "分析类型"]
+      .map((field) => row[field] || "")
+      .join("|");
+    if (seen.has(key)) return;
+    seen.add(key);
+    users += Number(row["新增用户数"] || 0);
+  });
+  return users;
+}
+
+function featureSampleUsersForRows(rows) {
+  const sampleRows = rows.some((row) => row["分析对象"] === "新增用户")
+    ? rows.filter((row) => row["分析对象"] === "新增用户")
+    : rows;
+  const seen = new Set();
+  let users = 0;
+  sampleRows.forEach((row) => {
+    const key = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号"]
+      .map((field) => row[field] || "")
+      .join("|");
+    if (seen.has(key)) return;
+    seen.add(key);
+    users += Number(row["新增用户数"] || 0);
+  });
+  return users;
+}
+
+function featureValue(metric, value) {
+  if (value === null || value === undefined || Number.isNaN(value)) return "NA";
+  if (metric === "新增用户数") return Math.round(value).toLocaleString("zh-CN");
+  return `${(Number(value) * 100).toFixed(2)}%`;
+}
+
+function featureDayHeader(day) {
+  const selectedProjects = (appState.featureProject || []).filter((project) => project !== "全部");
+  const projectLabel = selectedProjects.length === 1 ? selectedProjects[0] : "项目代号";
+  return `${projectLabel}_${day}`;
+}
+
+function weightedFeatureValue(rows, object, day) {
+  const objectRows = rows.filter((row) => row["分析对象"] === object);
+  let weighted = 0;
+  let weight = 0;
+  objectRows.forEach((row) => {
+    const value = Number(row[day]);
+    const users = Number(row["新增用户数"] || 0);
+    if (Number.isNaN(value)) return;
+    weighted += value * (users || 1);
+    weight += users || 1;
+  });
+  return weight ? weighted / weight : null;
+}
+
+function bestFeatureCompareField(rows) {
+  const selectedProjects = (appState.featureProject || []).filter((item) => item !== "全部");
+  const selectedCountries = (appState.featureCountry || []).filter((item) => item !== "全部");
+  const selectedVersions = (appState.featureVersion || []).filter((item) => item !== "全部");
+  const projects = uniqueValues(rows, "项目代号").filter((item) => item !== "全部");
+  if (selectedProjects.length > 1 && projects.length > 1) return "项目代号";
+  if (projects.length > 1) return "项目代号";
+  const countries = uniqueValues(rows, "国家").filter((item) => item !== "全部");
+  if (selectedCountries.length > 1 && countries.length > 1) return "国家";
+  if (countries.length > 1 && !isAggregateSelection(appState.featureCountry || [])) return "国家";
+  const versions = uniqueValues(rows, "版本号").filter((item) => item !== "全部");
+  if (selectedVersions.length > 1 && versions.length > 1) return "版本号";
+  if (versions.length > 1 && !isAggregateSelection(appState.featureVersion || [])) return "版本号";
+  return null;
+}
+
+function featureNoCompareMessage(rows) {
+  const selectedProjects = (appState.featureProject || []).filter((item) => item !== "全部");
+  const selectedCountries = (appState.featureCountry || []).filter((item) => item !== "全部");
+  const selectedVersions = (appState.featureVersion || []).filter((item) => item !== "全部");
+  const hasCompareIntent = selectedProjects.length > 1 || selectedCountries.length > 1 || selectedVersions.length > 1;
+  if (hasCompareIntent) {
+    const validParts = [];
+    const validProjects = uniqueValues(rows || [], "项目代号").filter((item) => item !== "全部");
+    const validCountries = uniqueValues(rows || [], "国家").filter((item) => item !== "全部");
+    const validVersions = uniqueValues(rows || [], "版本号").filter((item) => item !== "全部");
+    if (selectedProjects.length > 1) validParts.push(`项目 ${validProjects.join("、") || "无"}`);
+    if (selectedCountries.length > 1) validParts.push(`国家 ${validCountries.join("、") || "无"}`);
+    if (selectedVersions.length > 1) validParts.push(`版本 ${validVersions.join("、") || "无"}`);
+    return `样本过滤后可纳入分析的对比对象不足，暂时不能稳定判断谁更好。当前达标对象：${validParts.join("；") || "无"}。`;
+  }
+  return "当前只保留了一个整体口径：单个项目，且国家、版本号均为“全部”。如需判断哪个对象表现更好，请至少选择多个项目、多个国家或多个版本。";
+}
+
+function featureSampleFields() {
+  const fields = [];
+  const selectedProjects = (appState.featureProject || []).filter((item) => item !== "全部");
+  if (selectedProjects.length > 1) fields.push("项目代号");
+  if (!isAggregateSelection(appState.featureCountry || [])) fields.push("国家");
+  if (!isAggregateSelection(appState.featureVersion || [])) fields.push("版本号");
+  return fields;
+}
+
+function featureSampleLabel(item) {
+  const parts = [item.date].concat(item.fields.map((field) => `${field}: ${item.values[field] || "全部"}`));
+  return parts.join(" / ");
+}
+
+function featureSampleKey(row, fields) {
+  return [row["首次访问日期"] || ""].concat(fields.map((field) => row[field] || "")).join("|");
+}
+
+function buildFeatureOverview(rows) {
+  const selectedDays = featureSelectedDays();
+  const sampleFields = featureSampleFields();
+  const bySample = new Map();
+  rows.forEach((row) => {
+    const key = featureSampleKey(row, sampleFields);
+    if (!bySample.has(key)) {
+      const values = {};
+      sampleFields.forEach((field) => {
+        values[field] = row[field] || "";
+      });
+      bySample.set(key, { date: row["首次访问日期"], fields: sampleFields, values, rows: [] });
+    }
+    bySample.get(key).rows.push(row);
+  });
+  const dateSamples = [...bySample.values()]
+    .map((item) => ({ ...item, users: featureSampleUsersForRows(item.rows) }))
+    .sort((a, b) => {
+      const dateCompare = String(b.date).localeCompare(String(a.date), "zh-Hans-CN", { numeric: true });
+      if (dateCompare !== 0) return dateCompare;
+      return featureSampleLabel(a).localeCompare(featureSampleLabel(b), "zh-Hans-CN", { numeric: true });
+  });
+  const qualified = dateSamples.filter((item) => item.users > 200);
+  const excluded = dateSamples.filter((item) => item.users <= 200);
+  const analysisRows = qualified.flatMap((item) => item.rows);
+  const dateTokens = (items, warn = false) => items.length
+    ? items.map((item) => `<span class="feature-token ${warn ? "warn" : ""}">${featureSampleLabel(item)} / ${featureValue("新增用户数", item.users)}</span>`).join("")
+    : `<span class="feature-token ${warn ? "warn" : ""}">无</span>`;
+  const sampleUnitName = sampleFields.length ? sampleFields.join(" + ") : "首次访问日期";
+  const sampleHtml = `
+    <article class="feature-overview-card">
+      <div class="section-kicker">第一点：样本过滤</div>
+      <h3>${qualified.length} 个样本可纳入分析</h3>
+      <p class="muted">规则：按 ${sampleUnitName} 分别判断，只分析新增用户数大于 200 的样本；低样本版本或国家不会进入第二点结论。</p>
+      <div class="feature-token-list">${dateTokens(qualified)}</div>
+      <p class="muted" style="margin-top:14px;">排除样本</p>
+      <div class="feature-token-list">${dateTokens(excluded, true)}</div>
+    </article>
+  `;
+  if (!analysisRows.length) {
+    return `
+      <div class="feature-overview">
+        <div class="panel-title" style="margin-top:0;">
+          <div>
+            <h2>功能模块速览</h2>
+            <p class="muted">先排除样本不足的日期，再输出当前功能模块结论。</p>
+          </div>
+        </div>
+        <div class="feature-overview-grid">${sampleHtml}</div>
+      </div>
+    `;
+  }
+
+  const analysisType = appState.featureAnalysisType?.[0] || uniqueValues(analysisRows, "分析类型")[0];
+  const compareField = bestFeatureCompareField(analysisRows);
+  const compareValues = compareField ? uniqueValues(analysisRows, compareField).filter((value) => value !== "全部") : [];
+  const day = selectedDays[0] || "D0";
+  let conclusionHtml = "";
+
+  if (analysisType === "首次启动流程漏斗") {
+    const homeObject = "首页展示数";
+    const scoreItems = compareField
+      ? compareValues.map((value) => {
+        const valueRows = analysisRows.filter((row) => row[compareField] === value);
+        return { value, score: weightedFeatureValue(valueRows, homeObject, day) };
+      }).filter((item) => item.score !== null)
+      : [{ value: "当前筛选", score: weightedFeatureValue(analysisRows, homeObject, day) }];
+    const best = scoreItems.slice().sort((a, b) => b.score - a.score)[0];
+    const worst = scoreItems.slice().sort((a, b) => a.score - b.score)[0];
+    const funnelSteps = ["新增用户", "启动页展示", "多语言页展示", "引导页1展示数", "引导页2展示数", "引导页3展示数", "首页展示数"];
+    const stepValues = funnelSteps.map((object) => ({
+      object,
+      value: object === "新增用户" ? 1 : weightedFeatureValue(analysisRows, object, day),
+    })).filter((item) => item.value !== null);
+    const drops = stepValues.slice(1).map((item, index) => ({
+      from: stepValues[index].object,
+      to: item.object,
+      drop: stepValues[index].value - item.value,
+    })).sort((a, b) => b.drop - a.drop);
+    const mainDrop = drops[0];
+    conclusionHtml = `
+      <article class="feature-overview-card">
+        <div class="section-kicker">第二点：功能结论</div>
+        <h3>${compareField ? `${compareField} 对比` : "当前筛选"}：首页到达率</h3>
+        ${compareField
+          ? `<div class="feature-focus"><strong>${best?.value || "NA"}</strong> 表现更好，${day} 首页到达率为 <strong>${featureValue(day, best?.score)}</strong>。</div>`
+          : `<div class="feature-focus">${featureNoCompareMessage(analysisRows)}</div>
+             <p class="muted">当前整体口径下，${day} 首页到达率为 <strong>${featureValue(day, best?.score)}</strong>。</p>`}
+        ${compareField && worst ? `<p class="muted">相对较弱：${worst.value}（${featureValue(day, worst.score)}）。</p>` : ""}
+        ${mainDrop ? `<p class="muted">主要流失步骤：<strong>${mainDrop.from} → ${mainDrop.to}</strong>，下降 ${featureValue(day, mainDrop.drop)}。</p>` : ""}
+      </article>
+    `;
+  } else {
+    const modules = uniqueValues(analysisRows, "分析对象").filter((object) => object !== "新增用户");
+    const moduleScores = modules.map((object) => ({
+      object,
+      score: weightedFeatureValue(analysisRows, object, day),
+    })).filter((item) => item.score !== null).sort((a, b) => b.score - a.score);
+    const topModules = moduleScores.slice(0, 3);
+    const scoreItems = compareField
+      ? compareValues.map((value) => {
+        const valueRows = analysisRows.filter((row) => row[compareField] === value);
+        const scores = modules.map((object) => weightedFeatureValue(valueRows, object, day)).filter((value) => value !== null);
+        return { value, score: scores.length ? scores.reduce((sum, current) => sum + current, 0) / scores.length : null };
+      }).filter((item) => item.score !== null)
+      : [];
+    const best = scoreItems.slice().sort((a, b) => b.score - a.score)[0];
+    conclusionHtml = `
+      <article class="feature-overview-card">
+        <div class="section-kicker">第二点：功能结论</div>
+        <h3>${compareField ? `${compareField} 对比` : "首页模块点击率"}</h3>
+        ${compareField
+          ? (best ? `<div class="feature-focus"><strong>${best.value}</strong> 整体点击表现更好，${day} 模块平均点击率为 <strong>${featureValue(day, best.score)}</strong>。</div>` : "")
+          : `<div class="feature-focus">${featureNoCompareMessage(analysisRows)}</div>`}
+        <p class="muted">点击率靠前模块：${topModules.length ? topModules.map((item) => `<strong>${item.object}</strong>（${featureValue(day, item.score)}）`).join("、") : "暂无"}。</p>
+      </article>
+    `;
+  }
+
+  return `
+    <div class="feature-overview">
+      <div class="panel-title" style="margin-top:0;">
+        <div>
+          <h2>功能模块速览</h2>
+          <p class="muted">先排除样本不足的日期，再输出当前功能模块结论。</p>
+        </div>
+      </div>
+      <div class="feature-overview-grid">${sampleHtml}${conclusionHtml}</div>
+    </div>
+    <div class="panel-title">
+      <div>
+        <h2>明细数据</h2>
+        <p class="muted">按所选拆分维度查看分析对象表现。</p>
+      </div>
+    </div>
+  `;
+}
+
+function featureColumnDimension() {
+  const value = (appState.featureColumnDimension || [])[0];
+  return ["项目代号", "版本号", "国家"].includes(value) ? value : "项目代号";
+}
+
+function featureColumnValues(rows, field) {
+  const values = uniqueValues(rows, field);
+  const order = featureOptionsFor(field);
+  return values.sort((a, b) => {
+    const aIndex = order.indexOf(a);
+    const bIndex = order.indexOf(b);
+    if (aIndex !== -1 || bIndex !== -1) {
+      return (aIndex === -1 ? Number.MAX_SAFE_INTEGER : aIndex) - (bIndex === -1 ? Number.MAX_SAFE_INTEGER : bIndex);
+    }
+    return String(a).localeCompare(String(b), "zh-Hans-CN", { numeric: true });
+  });
+}
+
+function featureObjectNames(rows) {
+  const names = [];
+  const seen = new Set();
+  rows.forEach((row) => {
+    const object = row["分析对象"];
+    if (!object || object === "新增用户" || seen.has(object)) return;
+    seen.add(object);
+    names.push(object);
+  });
+  return names;
+}
+
+function renderFeature() {
+  const host = document.querySelector("#feature-content");
+  const meta = document.querySelector("#feature-meta");
+  if (!host || !meta || !isFeatureWorkspace()) return;
+  applyFeatureDefaults();
+  const rows = featureFilterRows();
+  if (!featureRows().length) {
+    host.innerHTML = `<div class="empty-state">当前 data.js 还没有功能模块数据。</div>`;
+    meta.innerHTML = "";
+    return;
+  }
+  if (!rows.length) {
+    host.innerHTML = `<div class="empty-state">当前筛选下没有功能模块数据。</div>`;
+    meta.innerHTML = "";
+    return;
+  }
+
+  const groupFields = [...new Set([...appState.featureGroupDimensions, "分析类型"])];
+  const groups = new Map();
+  rows.forEach((row) => {
+    const group = featureGroupKey(row, groupFields);
+    if (!groups.has(group.key)) {
+      groups.set(group.key, { labels: group.labels, rows: [] });
+    }
+    groups.get(group.key).rows.push(row);
+  });
+
+  const selectedDays = featureSelectedDays();
+  const sortedGroups = [...groups.values()].sort((a, b) => {
+    const aDate = a.rows[0]?.["首次访问日期"] || "";
+    const bDate = b.rows[0]?.["首次访问日期"] || "";
+    const dateDiff = String(bDate).localeCompare(String(aDate), "zh-Hans-CN", { numeric: true });
+    if (dateDiff !== 0) return dateDiff;
+    return a.labels.join("|").localeCompare(b.labels.join("|"), "zh-Hans-CN", { numeric: true });
+  });
+  const cards = sortedGroups.map((group) => {
+    const columnDimension = featureColumnDimension();
+    const columnValues = featureColumnValues(group.rows, columnDimension);
+    const objectNames = featureObjectNames(group.rows);
+    const columns = [];
+    columnValues.forEach((value) => {
+      const valueRows = group.rows.filter((row) => row[columnDimension] === value);
+      selectedDays.forEach((day) => {
+        columns.push({ value, day, rows: valueRows, label: `${value}_${day}` });
+      });
+    });
+    const filterLabels = [];
+    if (!groupFields.includes("国家")) {
+      filterLabels.push(`国家: ${(appState.featureCountry || []).join("、") || "全部"}`);
+    }
+    if (!groupFields.includes("版本号")) {
+      filterLabels.push(`版本号: ${(appState.featureVersion || []).join("、") || "全部"}`);
+    }
+    const titleLabels = [...group.labels, ...filterLabels];
+    const usersRow = `
+      <tr>
+        <th>新增用户数</th>
+        ${columns.map((column) => `<td>${featureValue("新增用户数", featureUsersForRows(column.rows))}</td>`).join("")}
+      </tr>
+    `;
+    const rowsHtml = objectNames.map((object) => `
+      <tr>
+        <th>${object}</th>
+        ${columns.map((column) => `<td>${featureValue(column.day, weightedFeatureValue(column.rows, object, column.day))}</td>`).join("")}
+      </tr>
+    `).join("");
+    return `
+      <article class="compare-card">
+        <div class="compare-head">
+          <div>
+            <div class="compare-title">${titleLabels.join(" \\ ")}</div>
+            <div class="muted">按 ${columnDimension} 展开列，查看 ${selectedDays.join("、")}</div>
+          </div>
+          <div class="pill">功能模块</div>
+        </div>
+        <div class="table-wrap">
+          <table class="metric-table">
+            <thead>
+              <tr>
+                <th>分析对象</th>
+                ${columns.map((column) => `<th>${column.label}</th>`).join("")}
+              </tr>
+            </thead>
+            <tbody>${usersRow}${rowsHtml}</tbody>
+          </table>
+        </div>
+      </article>
+    `;
+  }).join("");
+  host.innerHTML = `${buildFeatureOverview(rows)}${cards}`;
+  meta.innerHTML = `
+    <div class="hint">
+      当前功能模块使用 ${rows.length} 条记录；D0/D1 按新增用户数加权聚合。数据源目前来自 FR07 的 feature_export。
+    </div>
+  `;
+}
+
+function renderFeatureControls() {
+  if (!isFeatureWorkspace()) return;
+  applyFeatureDefaults();
+  const controls = [
+    ["#feature-report-date", "报表日期", "featureReportDate"],
+    ["#feature-project", "项目代号", "featureProject"],
+    ["#feature-first-date", "首次访问日期", "featureFirstVisitDate"],
+    ["#feature-country", "国家", "featureCountry"],
+    ["#feature-version", "版本号", "featureVersion"],
+    ["#feature-analysis-type", "分析类型", "featureAnalysisType"],
+  ];
+  controls.forEach(([selector, field, stateKey]) => {
+    const node = document.querySelector(selector);
+    if (!node) return;
+    const items = featureOptionsFor(field);
+    appState[stateKey] = (appState[stateKey] || []).filter((value) => items.includes(value));
+    if (!appState[stateKey].length) {
+      appState[stateKey] = field === "国家" || field === "版本号"
+        ? (items.includes("全部") ? ["全部"] : items.slice(0, 1))
+        : items.slice(0, field === "首次访问日期" ? 5 : 1);
+    }
+    renderMultiSelect(
+      node,
+      items,
+      appState[stateKey],
+      (values) => {
+        if (field === "国家" || field === "版本号") {
+          const hadAllSelected = appState[stateKey].includes("全部");
+          let nextValues = values;
+          if (nextValues.includes?.("全部")) {
+            nextValues = hadAllSelected && nextValues.length > 1
+              ? nextValues.filter((item) => item !== "全部")
+              : ["全部"];
+          } else {
+            nextValues = nextValues.filter((item) => item !== "全部");
+          }
+          appState[stateKey] = nextValues.length ? nextValues : ["全部"];
+        } else {
+          appState[stateKey] = values.length ? values : items.slice(0, 1);
+        }
+        rerender();
+      },
+      {
+        multiple: true,
+        size: field === "首次访问日期" ? 8 : 6,
+        summary: (values) => values.length ? values.join("、") : "请选择",
+      }
+    );
+  });
+  renderMultiSelect(
+    document.querySelector("#feature-days"),
+    featureMetrics().filter((metric) => /^D\d+$/.test(metric)),
+    appState.featureDays,
+    (values) => {
+      appState.featureDays = values.length ? values : ["D0"].filter((day) => featureMetrics().includes(day));
+      rerender();
+    },
+    {
+      multiple: true,
+      size: 4,
+      summary: (values) => values.length ? values.join("、") : "请选择分析天数",
+    }
+  );
+  renderMultiSelect(
+    document.querySelector("#feature-column-dimension"),
+    ["项目代号", "版本号", "国家"],
+    appState.featureColumnDimension,
+    (values) => {
+      const value = Array.isArray(values) ? values[0] : values;
+      appState.featureColumnDimension = value ? [value] : ["项目代号"];
+      rerender();
+    },
+    {
+      multiple: false,
+      size: 3,
+      summary: (values) => values[0] || "项目代号",
+    }
+  );
+  renderMultiSelect(
+    document.querySelector("#feature-group-dimensions"),
+    ["首次访问日期", "国家", "版本号", "分析类型"],
+    appState.featureGroupDimensions,
+    (values) => {
+      appState.featureGroupDimensions = values.length ? values : ["首次访问日期"];
+      rerender();
+    },
+    {
+      multiple: true,
+      size: 5,
+      summary: (values) => values.length ? `已选 ${values.length} 个拆分维度` : "不拆分，直接看总表",
+    }
+  );
+}
+
 function buildControlSection() {
+  if (isFeatureWorkspace()) {
+    renderFeatureControls();
+    return;
+  }
   const compareFieldBlock = document.querySelector("[data-control='compare-field']");
   const analysisModeBlock = document.querySelector("[data-control='analysis-mode']");
   const countryModeBlock = document.querySelector("[data-control='country-mode']");
@@ -4131,6 +4789,10 @@ function buildControlSection() {
 function rerender() {
   renderWorkspaceChrome();
   buildControlSection();
+  if (isFeatureWorkspace()) {
+    renderFeature();
+    return;
+  }
   const analysis = computeCompareAnalysis();
   renderCompareSummary(analysis);
   renderCompareDetails(analysis);

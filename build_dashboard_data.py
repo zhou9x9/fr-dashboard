@@ -14,6 +14,7 @@ OUTPUT_PATH = BASE_DIR / "data.js"
 
 MAIN_DIMENSIONS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号"]
 TIMING_DIMENSIONS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号", "通知时机"]
+FEATURE_DIMENSIONS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号", "分析类型", "分析对象", "展示格式"]
 
 RECOMMENDED_FUNNEL_METRICS = [
     "新增用户数",
@@ -58,7 +59,7 @@ def parse_value(field: str, raw: str):
     value = (raw or "").strip()
     if value == "":
         return None
-    if field in ("报表日期", "项目代号", "首次访问日期", "国家", "版本号", "通知时机"):
+    if field in ("报表日期", "项目代号", "首次访问日期", "国家", "版本号", "通知时机", "分析类型", "分析对象", "展示格式"):
         return value
 
     normalized = value.replace(",", "")
@@ -93,12 +94,17 @@ def read_csv_rows(path: Path, rename_map: dict[str, str] | None = None) -> tuple
     return header, rows
 
 
-def build_payload(common_csv_path: Path, timing_csv_path: Path):
+def build_payload(common_csv_path: Path, timing_csv_path: Path, feature_csv_path: Path | None = None):
     main_header, main_rows = read_csv_rows(common_csv_path)
     timing_header, timing_rows = read_csv_rows(timing_csv_path, rename_map={"版本": "版本号"})
+    if feature_csv_path:
+        feature_header, feature_rows = read_csv_rows(feature_csv_path, rename_map={"版本": "版本号"})
+    else:
+        feature_header, feature_rows = [], []
 
     main_metrics = [name for name in main_header if name not in MAIN_DIMENSIONS]
     timing_metrics = [name for name in timing_header if name not in TIMING_DIMENSIONS]
+    feature_metrics = [name for name in feature_header if name not in FEATURE_DIMENSIONS]
 
     metric_meta = {
         metric: {
@@ -123,6 +129,11 @@ def build_payload(common_csv_path: Path, timing_csv_path: Path):
             "metrics": timing_metrics,
             "rows": timing_rows,
         },
+        "feature": {
+            "dimensions": FEATURE_DIMENSIONS,
+            "metrics": feature_metrics,
+            "rows": feature_rows,
+        },
         "metricMeta": metric_meta,
     }
 
@@ -142,6 +153,12 @@ def parse_args():
         help="Path to the timing metrics CSV.",
     )
     parser.add_argument(
+        "--feature",
+        type=Path,
+        default=None,
+        help="Optional path to the feature module CSV.",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         default=OUTPUT_PATH,
@@ -152,7 +169,7 @@ def parse_args():
 
 def main():
     args = parse_args()
-    payload = build_payload(args.common, args.timing)
+    payload = build_payload(args.common, args.timing, args.feature)
     args.output.write_text(
         "window.FR_DASHBOARD_DATA = " + json.dumps(payload, ensure_ascii=False) + ";\n",
         encoding="utf-8",
