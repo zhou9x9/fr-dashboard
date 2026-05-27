@@ -3831,8 +3831,12 @@ function buildControlSection() {
             const selectedCountry = appState.filters["国家"]?.[0];
             return !selectedCountry || selectedCountry === "全部" || row["国家"] === selectedCountry;
           });
+          const availableVersions = versionOptionsForRows(versionRows);
+          const previousVersions = (appState.filters["版本号"] || []).filter((item) => availableVersions.includes(item));
           const recentVersions = defaultRecentVersionValues(versionRows);
-          appState.filters["版本号"] = recentVersions.length ? recentVersions : defaultRecentVersionValues();
+          appState.filters["版本号"] = previousVersions.length
+            ? previousVersions
+            : (recentVersions.length ? recentVersions : defaultRecentVersionValues());
           appState.compareValues = appState.filters["版本号"].slice();
         }
         if (appState.activeWorkspace === "version_iteration" && field === "版本号") {
