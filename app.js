@@ -3904,6 +3904,26 @@ function featureNoCompareMessage(rows) {
   return "当前只保留了一个整体口径：单个项目，且国家、版本号均为“全部”。如需判断哪个对象表现更好，请至少选择多个项目、多个国家或多个版本。";
 }
 
+function featureCountryPreferenceHtml(rows, modules, day) {
+  const countries = uniqueValues(rows, "国家").filter((country) => country && country !== "全部");
+  if (countries.length <= 1) return "";
+  const items = countries.map((country) => {
+    const countryRows = rows.filter((row) => row["国家"] === country);
+    const topModules = modules.map((object) => ({
+      object,
+      score: weightedFeatureValue(countryRows, object, day),
+    })).filter((item) => item.score !== null).sort((a, b) => b.score - a.score).slice(0, 2);
+    return { country, topModules };
+  }).filter((item) => item.topModules.length);
+  if (!items.length) return "";
+  return `
+    <p class="muted" style="margin-top:14px;">各国家功能偏好：</p>
+    <div class="feature-token-list">
+      ${items.map((item) => `<span class="feature-token"><strong>${item.country}</strong>：${item.topModules.map((module) => `${module.object}（${featureValue(day, module.score)}）`).join("、")}</span>`).join("")}
+    </div>
+  `;
+}
+
 function featureSampleFields() {
   const fields = [];
   const selectedProjects = (appState.featureProject || []).filter((item) => item !== "全部");
@@ -4021,6 +4041,7 @@ function buildFeatureOverview(rows) {
       score: weightedFeatureValue(analysisRows, object, day),
     })).filter((item) => item.score !== null).sort((a, b) => b.score - a.score);
     const topModules = moduleScores.slice(0, 3);
+    const countryPreferenceHtml = featureCountryPreferenceHtml(analysisRows, modules, day);
     const scoreItems = compareField
       ? compareValues.map((value) => {
         const valueRows = analysisRows.filter((row) => row[compareField] === value);
@@ -4037,6 +4058,7 @@ function buildFeatureOverview(rows) {
           ? (best ? `<div class="feature-focus"><strong>${best.value}</strong> 整体点击表现更好，${day} 模块平均点击率为 <strong>${featureValue(day, best.score)}</strong>。</div>` : "")
           : `<div class="feature-focus">${featureNoCompareMessage(analysisRows)}</div>`}
         <p class="muted">点击率靠前模块：${topModules.length ? topModules.map((item) => `<strong>${item.object}</strong>（${featureValue(day, item.score)}）`).join("、") : "暂无"}。</p>
+        ${countryPreferenceHtml}
       </article>
     `;
   }
@@ -4224,13 +4246,16 @@ function renderFeatureControls() {
             nextValues = nextValues.filter((item) => item !== "全部");
           }
           appState[stateKey] = nextValues.length ? nextValues : ["全部"];
+        } else if (field === "分析类型") {
+          const value = Array.isArray(values) ? values[0] : values;
+          appState[stateKey] = value ? [value] : items.slice(0, 1);
         } else {
           appState[stateKey] = values.length ? values : items.slice(0, 1);
         }
         rerender();
       },
       {
-        multiple: true,
+        multiple: field !== "分析类型",
         size: field === "首次访问日期" ? 8 : 6,
         summary: (values) => values.length ? values.join("、") : "请选择",
       }
