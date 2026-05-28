@@ -579,6 +579,71 @@
         gap: 16px;
       }
 
+      .feature-overview {
+        padding: 22px 24px;
+        border-radius: 26px;
+        background:
+          radial-gradient(circle at top left, rgba(208, 102, 63, 0.12), transparent 34%),
+          linear-gradient(180deg, rgba(255, 252, 246, 0.98), rgba(255, 246, 235, 0.78));
+        border: 1px solid rgba(208, 102, 63, 0.16);
+        margin-bottom: 22px;
+      }
+
+      .feature-overview-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+        gap: 16px;
+      }
+
+      .feature-overview-card {
+        padding: 18px;
+        border-radius: 22px;
+        background: rgba(255, 255, 255, 0.72);
+        border: 1px solid rgba(31, 42, 51, 0.08);
+      }
+
+      .feature-overview-card h3 {
+        margin: 8px 0 12px;
+        font-size: 21px;
+      }
+
+      .feature-token-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .feature-token {
+        display: inline-flex;
+        align-items: center;
+        border-radius: 999px;
+        padding: 6px 10px;
+        font-size: 12px;
+        font-weight: 800;
+        background: rgba(125, 143, 49, 0.12);
+        color: #53631f;
+      }
+
+      .feature-token.warn {
+        background: rgba(208, 102, 63, 0.12);
+        color: #a14526;
+      }
+
+      .feature-focus {
+        margin: 12px 0;
+        padding: 14px 16px;
+        border-radius: 18px;
+        background: rgba(208, 102, 63, 0.1);
+        color: var(--ink);
+        font-size: 15px;
+        line-height: 1.65;
+      }
+
+      .feature-focus strong {
+        font-size: 22px;
+      }
+
       .chart-legend {
         display: flex;
         flex-wrap: wrap;
@@ -741,7 +806,8 @@
 
         .timing-overview-grid,
         .timing-overview-grid.medium,
-        .timing-overview-grid.wide {
+        .timing-overview-grid.wide,
+        .feature-overview-grid {
           grid-template-columns: 1fr;
         }
       }
@@ -945,6 +1011,46 @@
               <div class="chips" id="timing-group-dimensions"></div>
             </div>
           </section>
+
+          <section class="panel" id="feature-controls-panel">
+            <h2>功能模块控制台</h2>
+            <div class="control-block">
+              <div class="label-row"><label>报表日期</label></div>
+              <div class="chips" id="feature-report-date"></div>
+            </div>
+            <div class="control-block">
+              <div class="label-row"><label>项目代号</label></div>
+              <div class="chips" id="feature-project"></div>
+            </div>
+            <div class="control-block">
+              <div class="label-row"><label>首次访问日期</label></div>
+              <div class="chips" id="feature-first-date"></div>
+            </div>
+            <div class="control-block">
+              <div class="label-row"><label>国家</label></div>
+              <div class="chips" id="feature-country"></div>
+            </div>
+            <div class="control-block">
+              <div class="label-row"><label>版本号</label></div>
+              <div class="chips" id="feature-version"></div>
+            </div>
+            <div class="control-block">
+              <div class="label-row"><label>分析类型</label></div>
+              <div class="chips" id="feature-analysis-type"></div>
+            </div>
+            <div class="control-block">
+              <div class="label-row"><label>分析天数</label></div>
+              <div class="chips" id="feature-days"></div>
+            </div>
+            <div class="control-block">
+              <div class="label-row"><label>列对比维度</label></div>
+              <div class="chips" id="feature-column-dimension"></div>
+            </div>
+            <div class="control-block">
+              <div class="label-row"><label>拆分维度</label></div>
+              <div class="chips" id="feature-group-dimensions"></div>
+            </div>
+          </section>
         </aside>
 
         <main class="section-stack">
@@ -992,6 +1098,11 @@
             </div>
             <div id="timing-bars"></div>
             <div id="timing-meta"></div>
+          </section>
+
+          <section class="panel" id="feature-result-panel">
+            <div id="feature-content"></div>
+            <div id="feature-meta"></div>
           </section>
         </main>
       </div>
