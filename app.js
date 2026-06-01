@@ -89,7 +89,7 @@ const WORKSPACES = {
     },
   },
   country_opt: {
-    label: "项目内·国家优化",
+    label: "单项目国家对比",
     note: "固定单项目后，直接比较不同国家的关键指标差距，帮助判断先优先优化哪个国家、哪个指标。",
     compareDefaults: {
       analysisMode: "single_project",
@@ -111,7 +111,7 @@ const WORKSPACES = {
     },
   },
   version_iteration: {
-    label: "项目内·版本迭代",
+    label: "单项目版本对比",
     note: "固定单项目后，对比版本和日期批次，判断迭代有没有效果，并结合漏斗观察阶段转化变化。",
     compareDefaults: {
       analysisMode: "single_project",
@@ -133,7 +133,7 @@ const WORKSPACES = {
     },
   },
   cross_project: {
-    label: "多项目·维护对比",
+    label: "多项目对比",
     note: "在统一维度口径下比较不同项目代号，快速识别哪个包在哪些指标上落后，以及差异是否可能由国家结构带来。",
     compareDefaults: {
       analysisMode: "cross_project",
@@ -155,7 +155,7 @@ const WORKSPACES = {
     },
   },
   timing_special: {
-    label: "通知时机专项",
+    label: "通知时机对比",
     note: "固定日期、项目、国家和版本后，按列对比维度观察同一批通知时机的触达质量与点击差异。",
   },
   feature_module: {
@@ -863,25 +863,25 @@ function renderWorkspaceChrome() {
     detailsTitle.textContent = "分国家指标明细";
     detailsDesc.textContent = "按首次访问日期拆开看 top 10 国家之间的新增用户和质量指标差异。";
   } else if (appState.activeWorkspace === "country_opt") {
-    compareControlsTitle.textContent = "国家优化控制台";
-    summaryTitle.textContent = "国家优化速览";
+    compareControlsTitle.textContent = "单项目国家对比控制台";
+    summaryTitle.textContent = "单项目国家对比速览";
     summaryDesc.textContent = "先看不同国家在哪些关键指标上拖后腿，方便决定优先优化哪里。";
     detailsTitle.textContent = "分国家指标明细";
     detailsDesc.textContent = "在当前项目、版本和日期范围下，逐组查看国家之间的指标差距。";
   } else if (appState.activeWorkspace === "version_iteration") {
-    compareControlsTitle.textContent = "版本迭代控制台";
+    compareControlsTitle.textContent = "单项目版本对比控制台";
     summaryTitle.textContent = "迭代效果速览";
     summaryDesc.textContent = "先判断这次版本对比是否样本充足，再看哪些指标出现了真实变化。";
     detailsTitle.textContent = "数据明细";
     detailsDesc.textContent = "根据当前筛选的首次访问日期和国家，直接查看所勾选版本号之间的数据差异。";
   } else if (appState.activeWorkspace === "cross_project") {
-    compareControlsTitle.textContent = "多项目维护控制台";
-    summaryTitle.textContent = "多项目维护速览";
+    compareControlsTitle.textContent = "多项目对比控制台";
+    summaryTitle.textContent = "多项目对比速览";
     summaryDesc.textContent = "统一维度口径后，先看哪些项目在哪些核心指标上落后。";
     detailsTitle.textContent = "多项目分组明细";
     detailsDesc.textContent = "逐组查看项目代号之间的指标差距，并结合国家结构判断差异来源。";
   } else if (appState.activeWorkspace === "timing_special") {
-    timingTitle.textContent = "通知时机专项";
+    timingTitle.textContent = "通知时机对比";
     timingDesc.textContent = "固定筛选范围后，按列对比维度查看相同通知时机在项目、国家或版本上的展示与点击表现。";
   } else if (appState.activeWorkspace === "feature_module") {
     if (featureTitle) featureTitle.textContent = "功能模块";
@@ -4352,10 +4352,10 @@ function buildControlSection() {
     compareValuesLabel.textContent = appState.activeWorkspace === "country_opt" ? "国家" : "参与对比的主体值";
   }
   if (groupDimensionsBlock) {
-    groupDimensionsBlock.style.display = isPaidCountry || appState.activeWorkspace === "cross_project" ? "none" : "";
+    groupDimensionsBlock.style.display = isPaidCountry ? "none" : "";
   }
   if (groupDimensionsWrap) {
-    groupDimensionsWrap.style.display = isPaidCountry || appState.activeWorkspace === "cross_project" ? "none" : "";
+    groupDimensionsWrap.style.display = isPaidCountry ? "none" : "";
   }
   if (compareMetricsBlock) {
     compareMetricsBlock.style.display = isPaidCountry ? "none" : "";
@@ -4567,7 +4567,7 @@ function buildControlSection() {
 
   renderMultiSelect(
     document.querySelector("#group-dimensions"),
-    DIMENSION_LABELS.filter((field) => {
+    (appState.activeWorkspace === "cross_project" ? ["首次访问日期", "国家"] : DIMENSION_LABELS).filter((field) => {
       if (["报表日期", appState.compareField].includes(field)) return false;
       if (appState.analysisMode === "single_project" && field === "项目代号") return false;
       return true;

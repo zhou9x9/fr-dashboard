@@ -845,7 +845,7 @@
         <div class="hero-main">
           <h1>FR 业务分析看板</h1>
           <div class="lead">
-            这个页面现在按分析任务来组织，而不是按一堆通用筛选来组织。你可以分别进入项目内国家优化、项目内版本迭代、多项目维护对比和通知时机专项，用更贴近业务问题的口径去看同一份底表。
+            这个页面现在按分析任务来组织，而不是按一堆通用筛选来组织。你可以分别进入单项目国家对比、单项目版本对比、多项目对比和通知时机对比，用更贴近业务问题的口径去看同一份底表。
           </div>
           <div class="meta" id="data-meta"></div>
         </div>
@@ -853,7 +853,7 @@
           <div>
             <div class="mini-title">What It Is Good At</div>
             <ul>
-              <li>项目内按国家找拖后腿的指标，服务国家优化</li>
+              <li>单项目按国家找拖后腿的指标，服务国家优化</li>
               <li>项目内按版本和日期看迭代效果，服务版本复盘</li>
               <li>多项目统一口径横比，服务多包维护</li>
               <li>专项分析通知时机的展示与点击差异</li>
@@ -923,12 +923,12 @@
               <div class="chips" id="compare-values"></div>
             </div>
             <div class="control-block">
-              <div class="label-row"><label>拆分维度</label></div>
-              <div class="chips" id="group-dimensions"></div>
-            </div>
-            <div class="control-block">
               <div class="label-row"><label>关注指标</label></div>
               <div class="chips" id="compare-metrics"></div>
+            </div>
+            <div class="control-block" data-control="group-dimensions">
+              <div class="label-row"><label>拆分维度</label></div>
+              <div class="chips" id="group-dimensions"></div>
             </div>
           </section>
 
@@ -969,7 +969,7 @@
           </section>
 
           <section class="panel" id="timing-controls-panel">
-            <h2>通知时机专项</h2>
+            <h2>通知时机对比</h2>
             <div class="control-block" data-control="timing-compare-values">
               <div class="label-row"><label>参与对比项目</label></div>
               <div class="chips" id="timing-compare-values"></div>
