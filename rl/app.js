@@ -156,7 +156,7 @@ const WORKSPACES = {
   },
   timing_special: {
     label: "通知时机专项",
-    note: "固定日期和国家后，对比同一批通知时机在不同项目上的表现，适合专门观察触达质量与点击差异。",
+    note: "固定日期、项目、国家和版本后，按列对比维度观察同一批通知时机的触达质量与点击差异。",
   },
   feature_module: {
     label: "功能模块",
@@ -423,7 +423,7 @@ function compareValueOptions(rows, compareField = appState.compareField) {
 
 function selectedTimingProjects() {
   const projects = compareCandidateValues(dashboardData.timing.rows, "项目代号");
-  const selected = appState.timingCompareValues.filter((project) => projects.includes(project));
+  const selected = appState.timingProject.filter((project) => projects.includes(project));
   return selected.length ? selected : projects;
 }
 
@@ -599,7 +599,7 @@ function applyFeatureDefaults(workspaceKey = appState.activeWorkspace) {
 }
 
 function timingAvailableCompareFields() {
-  return ["项目代号"];
+  return ["项目代号", "国家", "版本号"].filter((field) => dashboardData.timing.dimensions.includes(field));
 }
 
 function funnelAvailableCompareFields() {
@@ -668,7 +668,7 @@ function ensureDefaults() {
   }
   if (!appState.timingProject.length && dashboardData.timing.dimensions.includes("项目代号")) {
     const projects = timingOptionsFor("项目代号");
-    appState.timingProject = projects.includes("全部") ? ["全部"] : projects.slice(0, 1);
+    appState.timingProject = projects.includes("全部") ? ["全部"] : projects.slice(0, 2);
   }
   if (!appState.timingTiming.length) {
     appState.timingTiming = timingOptionsFor("通知时机").filter((item) => item !== "全部");
@@ -676,6 +676,9 @@ function ensureDefaults() {
   if (!appState.timingGroupDimensions.length) {
     appState.timingGroupDimensions = ["首次访问日期"]
       .filter((field) => dashboardData.timing.dimensions.includes(field));
+  }
+  if (!timingAvailableCompareFields().includes(appState.timingCompareField)) {
+    appState.timingCompareField = timingAvailableCompareFields()[0] || "项目代号";
   }
   if (!appState.timingCompareValues.length) {
     appState.timingCompareValues = compareCandidateValues(dashboardData.timing.rows, "项目代号").slice(0, 2);
@@ -879,7 +882,7 @@ function renderWorkspaceChrome() {
     detailsDesc.textContent = "逐组查看项目代号之间的指标差距，并结合国家结构判断差异来源。";
   } else if (appState.activeWorkspace === "timing_special") {
     timingTitle.textContent = "通知时机专项";
-    timingDesc.textContent = "固定日期和国家后，对比相同通知时机在不同项目上的展示与点击表现。";
+    timingDesc.textContent = "固定筛选范围后，按列对比维度查看相同通知时机在项目、国家或版本上的展示与点击表现。";
   } else if (appState.activeWorkspace === "feature_module") {
     if (featureTitle) featureTitle.textContent = "功能模块";
     if (featureDesc) featureDesc.textContent = "按分析类型查看首次启动流程漏斗和首页模块点击率。";
@@ -3387,11 +3390,13 @@ function renderFunnel() {
 }
 
 function computeTimingData() {
-  const compareField = "项目代号";
+  const compareField = timingAvailableCompareFields().includes(appState.timingCompareField)
+    ? appState.timingCompareField
+    : "项目代号";
   appState.timingCompareField = compareField;
   const filters = {
     报表日期: appState.timingReportDate,
-    项目代号: [],
+    项目代号: appState.timingProject,
     首次访问日期: appState.timingFirstVisitDate,
     国家: appState.timingCountry,
     版本号: appState.timingVersion,
@@ -3399,9 +3404,6 @@ function computeTimingData() {
   };
   const rows = dashboardData.timing.rows.filter((row) =>
     Object.entries(filters).every(([field, allowed]) => {
-      if (field === compareField) {
-        return true;
-      }
       if (!dashboardData.timing.dimensions.includes(field)) {
         return true;
       }
@@ -3415,9 +3417,7 @@ function computeTimingData() {
     })
   );
   const compareCandidates = compareCandidateValues(rows, compareField);
-  const compareValues = appState.timingCompareValues.length
-    ? appState.timingCompareValues.filter((value) => compareCandidates.includes(value))
-    : compareCandidates;
+  const compareValues = compareCandidates;
   appState.timingCompareValues = compareValues;
   const subjects = compareValues
     .map((subject) => {
@@ -3434,7 +3434,7 @@ function computeTimingData() {
     .map((timing) => {
       const timingSubjects = compareValues
         .map((subject) => {
-          const timingRows = rows.filter((row) => row["通知时机"] === timing && row["项目代号"] === subject);
+          const timingRows = rows.filter((row) => row["通知时机"] === timing && row[compareField] === subject);
           return {
             subject,
             rows: timingRows,
@@ -3457,26 +3457,26 @@ function computeTimingData() {
       detailGroupMap.set(key, {
         key,
         labels,
-        projectRows: {},
+        subjectRows: {},
       });
     }
     const group = detailGroupMap.get(key);
-    const project = row["项目代号"];
-    if (!group.projectRows[project]) {
-      group.projectRows[project] = [];
+    const subject = row[compareField];
+    if (!group.subjectRows[subject]) {
+      group.subjectRows[subject] = [];
     }
-    group.projectRows[project].push(row);
+    group.subjectRows[subject].push(row);
   });
   const detailGroups = [...detailGroupMap.values()]
     .map((group) => ({
       ...group,
       subjects: compareValues
         .map((subject) => {
-          const projectRows = group.projectRows[subject] || [];
+          const subjectRows = group.subjectRows[subject] || [];
           return {
             subject,
-            rows: projectRows,
-            aggregated: projectRows.length ? aggregateRows(projectRows, dashboardData.timing.metrics) : null,
+            rows: subjectRows,
+            aggregated: subjectRows.length ? aggregateRows(subjectRows, dashboardData.timing.metrics) : null,
           };
         })
         .filter((item) => item.aggregated),
@@ -3492,13 +3492,13 @@ function computeTimingData() {
   return { rows, subjects, timingBreakdown, detailGroups, compareField };
 }
 
-function buildTimingOverview(rows, subjects, timingBreakdown) {
+function buildTimingOverview(rows, subjects, timingBreakdown, compareField) {
   const selectedDates = appState.timingFirstVisitDate?.length
     ? appState.timingFirstVisitDate.slice()
     : timingOptionsFor("首次访问日期");
   const dateProjectChecks = subjects.map((subject) => {
     const dateUsers = selectedDates.map((date) => {
-      const subjectRows = rows.filter((row) => row["项目代号"] === subject.subject && row["首次访问日期"] === date);
+      const subjectRows = rows.filter((row) => row[compareField] === subject.subject && row["首次访问日期"] === date);
       const users = subjectRows.length ? (aggregateRows(subjectRows, ["新增用户数"])?.["新增用户数"] || 0) : 0;
       return { date, users };
     });
@@ -3525,7 +3525,7 @@ function buildTimingOverview(rows, subjects, timingBreakdown) {
             ${
               qualifiedProjects.length
                 ? qualifiedProjects.map((item) => `<div><strong>${item.subject}</strong>：${item.qualifiedDates.map((point) => point.date).join("、")}</div>`).join("")
-                : "当前所选项目在所选日期里都没有 > 200 的新增用户样本。"
+                : `当前所选${compareField}在所选日期里都没有 > 200 的新增用户样本。`
             }
           </div>
         </div>
@@ -3558,7 +3558,7 @@ function buildTimingOverview(rows, subjects, timingBreakdown) {
     };
   }
 
-  const qualifiedRows = rows.filter((row) => qualifiedDateMap.get(row["项目代号"])?.has(row["首次访问日期"]));
+  const qualifiedRows = rows.filter((row) => qualifiedDateMap.get(row[compareField])?.has(row["首次访问日期"]));
   const displayMetric = "D0展示用户率";
   const clickMetric = "D0通知点击率";
 
@@ -3601,9 +3601,9 @@ function buildTimingOverview(rows, subjects, timingBreakdown) {
       </div>
     `;
   } else {
-    const projectValues = qualifiedProjects.map((item) => {
-      const projectRows = qualifiedRows.filter((row) => row["项目代号"] === item.subject);
-      const aggregated = aggregateRows(projectRows, [displayMetric, clickMetric]);
+    const compareValues = qualifiedProjects.map((item) => {
+      const subjectRows = qualifiedRows.filter((row) => row[compareField] === item.subject);
+      const aggregated = aggregateRows(subjectRows, [displayMetric, clickMetric]);
       return {
         subject: item.subject,
         display: aggregated?.[displayMetric],
@@ -3611,9 +3611,9 @@ function buildTimingOverview(rows, subjects, timingBreakdown) {
       };
     }).filter((item) => item.display !== null || item.click !== null);
 
-    const bestDisplay = projectValues.slice().sort((a, b) => (b.display || 0) - (a.display || 0))[0] || null;
-    const bestClick = projectValues.slice().sort((a, b) => (b.click || 0) - (a.click || 0))[0] || null;
-    const rankedProjects = projectValues.map((item) => {
+    const bestDisplay = compareValues.slice().sort((a, b) => (b.display || 0) - (a.display || 0))[0] || null;
+    const bestClick = compareValues.slice().sort((a, b) => (b.click || 0) - (a.click || 0))[0] || null;
+    const rankedSubjects = compareValues.map((item) => {
       let leads = [];
       if (bestDisplay && item.subject === bestDisplay.subject) leads.push("展示率");
       if (bestClick && item.subject === bestClick.subject) leads.push("点击率");
@@ -3623,19 +3623,19 @@ function buildTimingOverview(rows, subjects, timingBreakdown) {
     secondStepBlock = `
       <div class="stat-card" style="padding:22px 24px; margin-top:14px;">
         <div class="eyebrow">综合结论</div>
-        <div class="stat-title" style="font-size:24px; line-height:1.35;">${rankedProjects[0]?.subject || "NA"} 当前更优</div>
+        <div class="stat-title" style="font-size:24px; line-height:1.35;">${rankedSubjects[0]?.subject || "NA"} 当前更优</div>
         <div class="muted" style="margin-top:10px; line-height:1.9;">
           ${
-            rankedProjects[0]?.leads.length
-              ? `主要好在：${rankedProjects[0].leads.join("、")}。`
+            rankedSubjects[0]?.leads.length
+              ? `主要好在：${rankedSubjects[0].leads.join("、")}。`
               : "当前没有拉开明显的展示率 / 点击率差异。"
           }
         </div>
       </div>
       <div class="stats-grid" style="margin-top:14px;">
-        ${rankedProjects.map((item) => `
+        ${rankedSubjects.map((item) => `
           <div class="stat-card">
-            <div class="eyebrow">项目表现</div>
+            <div class="eyebrow">${compareField}表现</div>
             <div class="stat-title">${item.subject}</div>
             <div class="stat-value">${item.leads.length ? `${item.leads.join(" / ")}领先` : "暂无明显领先"}</div>
             <div class="muted">
@@ -3664,7 +3664,7 @@ function buildTimingOverview(rows, subjects, timingBreakdown) {
 function renderTiming() {
   const host = document.querySelector("#timing-bars");
   const meta = document.querySelector("#timing-meta");
-  const { rows, subjects, timingBreakdown, detailGroups } = computeTimingData();
+  const { rows, subjects, timingBreakdown, detailGroups, compareField } = computeTimingData();
   if (!rows.length || !subjects.length) {
     host.innerHTML = `<div class="empty-state">通知时机区域当前没有数据。</div>`;
     if (meta) {
@@ -3677,7 +3677,7 @@ function renderTiming() {
       <div class="compare-head">
         <div>
           <div class="compare-title">${metric}</div>
-          <div class="muted">纵轴是通知时机，横轴是指标值，系列是项目</div>
+          <div class="muted">纵轴是通知时机，横轴是指标值，系列是${compareField}</div>
         </div>
       </div>
       <div class="chart-legend">
@@ -3707,7 +3707,7 @@ function renderTiming() {
         <div class="compare-head">
           <div>
             <div class="compare-title">${group.labels.join(" / ")}</div>
-            <div class="muted">按所选维度拆开的分项目指标对比</div>
+            <div class="muted">按所选维度拆开的分${compareField}指标对比</div>
           </div>
           <div class="pill">细分时机</div>
         </div>
@@ -3725,14 +3725,14 @@ function renderTiming() {
       </article>
     `;
   }).join("");
-  const timingOverview = buildTimingOverview(rows, subjects, timingBreakdown);
+  const timingOverview = buildTimingOverview(rows, subjects, timingBreakdown, compareField);
   host.innerHTML = `
     ${timingOverview.summaryHtml}
     <div class="stat-card" style="padding:22px 24px; margin-top:20px;">
       <div class="panel-title" style="margin-top:0;">
         <div>
           <h2>所有通知时机总览</h2>
-          <p class="muted">纵轴是通知时机，横轴是指标值，不同颜色代表不同项目。</p>
+          <p class="muted">纵轴是通知时机，横轴是指标值，不同颜色代表不同${compareField}。</p>
         </div>
       </div>
       <div class="${timingOverviewGridClass(timingBreakdown.length)}">${overviewCharts}</div>
@@ -3740,7 +3740,7 @@ function renderTiming() {
     <div class="panel-title">
       <div>
         <h2>细分通知时机对比</h2>
-        <p class="muted">再按你选定的拆分维度，加上通知时机本身，查看不同项目之间的实际差异。</p>
+        <p class="muted">再按你选定的拆分维度，加上通知时机本身，查看不同${compareField}之间的实际差异。</p>
       </div>
     </div>
     <div class="timing-detail-stack">${timingCards || '<div class="empty-state">当前通知时机筛选下没有细分数据。</div>'}</div>
@@ -3749,6 +3749,7 @@ function renderTiming() {
     meta.innerHTML = `
       <div class="hint">
         当前先排除低样本日期，再看通知时机的展示率和点击率差异。首次访问日期支持多选，国家默认取全部，通知时机默认全选。
+        当前列对比维度为 <strong>${compareField}</strong>。
       </div>
     `;
   }
@@ -3904,6 +3905,26 @@ function featureNoCompareMessage(rows) {
   return "当前只保留了一个整体口径：单个项目，且国家、版本号均为“全部”。如需判断哪个对象表现更好，请至少选择多个项目、多个国家或多个版本。";
 }
 
+function featureCountryPreferenceHtml(rows, modules, day) {
+  const countries = uniqueValues(rows, "国家").filter((country) => country && country !== "全部");
+  if (countries.length <= 1) return "";
+  const items = countries.map((country) => {
+    const countryRows = rows.filter((row) => row["国家"] === country);
+    const topModules = modules.map((object) => ({
+      object,
+      score: weightedFeatureValue(countryRows, object, day),
+    })).filter((item) => item.score !== null).sort((a, b) => b.score - a.score).slice(0, 2);
+    return { country, topModules };
+  }).filter((item) => item.topModules.length);
+  if (!items.length) return "";
+  return `
+    <p class="muted" style="margin-top:14px;">各国家功能偏好：</p>
+    <div class="feature-token-list">
+      ${items.map((item) => `<span class="feature-token"><strong>${item.country}</strong>：${item.topModules.map((module) => `${module.object}（${featureValue(day, module.score)}）`).join("、")}</span>`).join("")}
+    </div>
+  `;
+}
+
 function featureSampleFields() {
   const fields = [];
   const selectedProjects = (appState.featureProject || []).filter((item) => item !== "全部");
@@ -4021,6 +4042,7 @@ function buildFeatureOverview(rows) {
       score: weightedFeatureValue(analysisRows, object, day),
     })).filter((item) => item.score !== null).sort((a, b) => b.score - a.score);
     const topModules = moduleScores.slice(0, 3);
+    const countryPreferenceHtml = featureCountryPreferenceHtml(analysisRows, modules, day);
     const scoreItems = compareField
       ? compareValues.map((value) => {
         const valueRows = analysisRows.filter((row) => row[compareField] === value);
@@ -4037,6 +4059,7 @@ function buildFeatureOverview(rows) {
           ? (best ? `<div class="feature-focus"><strong>${best.value}</strong> 整体点击表现更好，${day} 模块平均点击率为 <strong>${featureValue(day, best.score)}</strong>。</div>` : "")
           : `<div class="feature-focus">${featureNoCompareMessage(analysisRows)}</div>`}
         <p class="muted">点击率靠前模块：${topModules.length ? topModules.map((item) => `<strong>${item.object}</strong>（${featureValue(day, item.score)}）`).join("、") : "暂无"}。</p>
+        ${countryPreferenceHtml}
       </article>
     `;
   }
@@ -4224,13 +4247,16 @@ function renderFeatureControls() {
             nextValues = nextValues.filter((item) => item !== "全部");
           }
           appState[stateKey] = nextValues.length ? nextValues : ["全部"];
+        } else if (field === "分析类型") {
+          const value = Array.isArray(values) ? values[0] : values;
+          appState[stateKey] = value ? [value] : items.slice(0, 1);
         } else {
           appState[stateKey] = values.length ? values : items.slice(0, 1);
         }
         rerender();
       },
       {
-        multiple: true,
+        multiple: field !== "分析类型",
         size: field === "首次访问日期" ? 8 : 6,
         summary: (values) => values.length ? values.join("、") : "请选择",
       }
@@ -4682,21 +4708,14 @@ function buildControlSection() {
     `).join("");
     timingCompareFieldSelect.onchange = (event) => {
       appState.timingCompareField = event.target.value;
-      appState.timingCompareValues = compareCandidateValues(dashboardData.timing.rows, "项目代号").slice(0, 2);
       rerender();
     };
   }
 
-  renderMultiSelect(
-    document.querySelector("#timing-compare-values"),
-    compareCandidateValues(dashboardData.timing.rows, "项目代号"),
-    appState.timingCompareValues,
-    (values) => {
-      appState.timingCompareValues = values;
-      rerender();
-    },
-    { multiple: true, size: 6, summary: (values) => values.length ? values.join("、") : "请选择项目" }
-  );
+  const timingCompareValuesBlock = document.querySelector("[data-control='timing-compare-values']");
+  if (timingCompareValuesBlock) {
+    timingCompareValuesBlock.style.display = "none";
+  }
 
   renderMultiSelect(
     document.querySelector("#timing-group-dimensions"),
@@ -4714,6 +4733,7 @@ function buildControlSection() {
   );
 
   const timingControls = [
+    ["#timing-project", "项目代号", "timingProject"],
     ["#timing-report-date", "报表日期", "timingReportDate"],
     ["#timing-first-date", "首次访问日期", "timingFirstVisitDate"],
     ["#timing-country", "国家", "timingCountry"],
@@ -4724,7 +4744,7 @@ function buildControlSection() {
     const node = document.querySelector(selector);
     if (!node) continue;
     const block = node.closest(".control-block");
-    const shouldShow = dashboardData.timing.dimensions.includes(field) && field !== appState.timingCompareField;
+    const shouldShow = dashboardData.timing.dimensions.includes(field);
     if (block) {
       block.style.display = shouldShow ? "" : "none";
     }
@@ -4738,9 +4758,9 @@ function buildControlSection() {
       timingItems,
       appState[stateKey],
       (values) => {
-        if (field === "国家" || field === "报表日期") {
+        if (field === "报表日期") {
           appState[stateKey] = values ? [values] : [];
-        } else if (field === "版本号") {
+        } else if (field === "国家" || field === "版本号") {
           let nextValues = values;
           const hadAllSelected = appState[stateKey].includes("全部");
           if (nextValues.includes?.("全部")) {
@@ -4759,7 +4779,7 @@ function buildControlSection() {
         rerender();
       },
       {
-        multiple: !["国家", "报表日期"].includes(field),
+        multiple: field !== "报表日期",
         size: field === "首次访问日期" ? 8 : 6,
         summary: field === "通知时机"
           ? (values) => values.length ? `已选 ${values.length} 个通知时机` : "请选择通知时机"
@@ -4767,6 +4787,10 @@ function buildControlSection() {
           ? (values) => values.length ? values.join("、") : "请选择首次访问日期"
           : field === "版本号"
           ? (values) => values.length ? values.join("、") : "请选择版本号"
+          : field === "项目代号"
+          ? (values) => values.length ? values.join("、") : "请选择项目"
+          : field === "国家"
+          ? (values) => values.length ? values.join("、") : "请选择国家"
           : null,
       }
     );
@@ -4774,7 +4798,7 @@ function buildControlSection() {
 
   const timingProjectBlock = document.querySelector("[data-control='timing-project-filter']");
   if (timingProjectBlock) {
-    timingProjectBlock.style.display = "none";
+    timingProjectBlock.style.display = "";
   }
   const timingVersionBlock = document.querySelector("[data-control='timing-version-filter']");
   if (timingVersionBlock) {
@@ -4782,7 +4806,7 @@ function buildControlSection() {
   }
   const timingCompareFieldBlock = document.querySelector("[data-control='timing-compare-field']");
   if (timingCompareFieldBlock) {
-    timingCompareFieldBlock.style.display = "none";
+    timingCompareFieldBlock.style.display = "";
   }
 }
 
