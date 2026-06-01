@@ -1108,8 +1108,20 @@
       </div>
     </div>
 
-    <script src="./data.js"></script>
-    <script src="./app.js"></script>
+    <script>
+      (function loadDashboardScripts() {
+        var cacheKey = String(Date.now());
+        function loadScript(src, onload) {
+          var script = document.createElement("script");
+          script.src = src + "?v=" + cacheKey;
+          script.onload = onload;
+          document.body.appendChild(script);
+        }
+        loadScript("./data.js", function () {
+          loadScript("./app.js");
+        });
+      })();
+    </script>
   </body>
 </html>
 
