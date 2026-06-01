@@ -44,13 +44,11 @@ function isAllowedCompareMetric(metric) {
 
 const COMPARE_METRICS = dashboardData.main.metrics.filter(isAllowedCompareMetric);
 const MIN_CONCLUSION_SAMPLE = 30;
-const TIMING_OVERVIEW_METRICS = [
+const DEFAULT_TIMING_METRICS = [
   "D0展示用户率",
-  "D1展示用户率",
-  "D0人均展示次数",
-  "D1人均展示次数",
   "D0通知点击率",
-  "D1通知点击率",
+  "D0人均展示次数",
+  "D0人均点击次数",
 ];
 const SERIES_COLORS = ["#d0663f", "#26547c", "#7d8f31", "#9a4d7b"];
 const TIMING_SHORT_LABELS = {
@@ -159,7 +157,7 @@ const WORKSPACES = {
     note: "固定日期、项目、国家和版本后，按列对比维度观察同一批通知时机的触达质量与点击差异。",
   },
   notification_copy: {
-    label: "通知文案",
+    label: "通知文案对比",
     note: "固定日期、项目、国家和版本后，按列对比维度观察不同通知文案的展示与点击差异。",
   },
   feature_module: {
@@ -195,7 +193,7 @@ const appState = {
   funnelMetrics: dashboardData.main.recommendedFunnelMetrics.filter((metric) => COMPARE_METRICS.includes(metric)).slice(),
   timingCompareField: "项目代号",
   timingCompareValues: [],
-  timingMetric: "D0通知点击率",
+  timingMetrics: DEFAULT_TIMING_METRICS.filter((metric) => dashboardData.timing.metrics.includes(metric)),
   timingReportDate: [],
   timingProject: [],
   timingFirstVisitDate: [],
@@ -638,6 +636,10 @@ function applyTimingDefaults(workspaceKey = appState.activeWorkspace) {
   keepValid("timingFirstVisitDate", "首次访问日期", timingOptionsFor("首次访问日期").slice(-5));
   keepValid("timingVersion", "版本号", timingOptionsFor("版本号").includes("全部") ? ["全部"] : timingOptionsFor("版本号").slice(0, 1));
   keepValid("timingCountry", "国家", timingOptionsFor("国家").includes("全部") ? ["全部"] : timingOptionsFor("国家").slice(0, 1));
+  const keptMetrics = (appState.timingMetrics || []).filter((metric) => dashboardData.timing.metrics.includes(metric));
+  appState.timingMetrics = keptMetrics.length
+    ? keptMetrics
+    : DEFAULT_TIMING_METRICS.filter((metric) => dashboardData.timing.metrics.includes(metric));
 
   const objectOptions = timingOptionsFor("通知时机").filter((item) => item !== "全部");
   const keptObjects = (appState.timingTiming || []).filter((value) => objectOptions.includes(value));
@@ -945,8 +947,8 @@ function renderWorkspaceChrome() {
     timingTitle.textContent = "通知时机对比";
     timingDesc.textContent = "固定筛选范围后，按列对比维度查看相同通知时机在项目、国家或版本上的展示与点击表现。";
   } else if (appState.activeWorkspace === "notification_copy") {
-    if (timingControlsTitle) timingControlsTitle.textContent = "通知文案控制台";
-    timingTitle.textContent = "通知文案";
+    if (timingControlsTitle) timingControlsTitle.textContent = "通知文案对比控制台";
+    timingTitle.textContent = "通知文案对比";
     timingDesc.textContent = "固定筛选范围后，按列对比维度查看相同通知文案在项目、国家或版本上的展示与点击表现。";
   } else if (appState.activeWorkspace === "feature_module") {
     if (featureTitle) featureTitle.textContent = "功能模块";
@@ -3740,7 +3742,12 @@ function renderTiming() {
     }
     return;
   }
-  const overviewCharts = TIMING_OVERVIEW_METRICS.map((metric) => `
+  const selectedTimingMetrics = (appState.timingMetrics || [])
+    .filter((metric) => dashboardData.timing.metrics.includes(metric));
+  const overviewMetrics = selectedTimingMetrics.length
+    ? selectedTimingMetrics
+    : DEFAULT_TIMING_METRICS.filter((metric) => dashboardData.timing.metrics.includes(metric));
+  const overviewCharts = overviewMetrics.map((metric) => `
     <article class="compare-card">
       <div class="compare-head">
         <div>
@@ -3803,7 +3810,7 @@ function renderTiming() {
           <p class="muted">纵轴是${objectLabel}，横轴是指标值，不同颜色代表不同${compareField}。</p>
         </div>
       </div>
-      <div class="${timingOverviewGridClass(timingBreakdown.length)}">${overviewCharts}</div>
+    <div class="${timingOverviewGridClass(overviewMetrics.length)}">${overviewCharts}</div>
     </div>
     <div class="panel-title">
       <div>
@@ -4758,18 +4765,22 @@ function buildControlSection() {
     { multiple: true, size: 8 }
   );
 
-  const timingMetricSelect = document.querySelector("#timing-metric");
-  timingMetricSelect.innerHTML = dashboardData.timing.metrics.map((metric) => `
-    <option value="${metric}" ${metric === appState.timingMetric ? "selected" : ""}>${metric}</option>
-  `).join("");
-  timingMetricSelect.onchange = (event) => {
-    appState.timingMetric = event.target.value;
-    rerender();
-  };
-  const timingMetricBlock = document.querySelector("[data-control='timing-metric']");
-  if (timingMetricBlock) {
-    timingMetricBlock.style.display = "none";
-  }
+  renderMultiSelect(
+    document.querySelector("#timing-metrics"),
+    dashboardData.timing.metrics,
+    appState.timingMetrics,
+    (values) => {
+      appState.timingMetrics = values.length
+        ? values
+        : DEFAULT_TIMING_METRICS.filter((metric) => dashboardData.timing.metrics.includes(metric));
+      rerender();
+    },
+    {
+      multiple: true,
+      size: 8,
+      summary: (values) => values.length ? `已选 ${values.length} 个指标` : "请选择关注指标",
+    }
+  );
 
   const timingCompareFieldSelect = document.querySelector("#timing-compare-field");
   if (timingCompareFieldSelect) {
