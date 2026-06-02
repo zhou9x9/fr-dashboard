@@ -13,7 +13,7 @@ TIMING_CSV_PATH = Path("/Users/macseven1seven/Downloads/FR07_FR08_feishu_timing_
 OUTPUT_PATH = BASE_DIR / "data.js"
 
 MAIN_DIMENSIONS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号"]
-TIMING_DIMENSIONS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号", "通知时机"]
+TIMING_DIMENSIONS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号", "分析类型", "通知时机"]
 FEATURE_DIMENSIONS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号", "分析类型", "分析对象", "展示格式"]
 
 RECOMMENDED_FUNNEL_METRICS = [
@@ -94,9 +94,29 @@ def read_csv_rows(path: Path, rename_map: dict[str, str] | None = None) -> tuple
     return header, rows
 
 
+def normalize_timing_table(header: list[str], rows: list[dict]) -> tuple[list[str], list[dict]]:
+    normalized_header = [name for name in header if name != "分析对象"]
+    if "分析类型" not in normalized_header:
+      insert_at = normalized_header.index("版本号") + 1 if "版本号" in normalized_header else len(TIMING_DIMENSIONS) - 1
+      normalized_header.insert(insert_at, "分析类型")
+    if "通知时机" not in normalized_header:
+      insert_at = normalized_header.index("分析类型") + 1 if "分析类型" in normalized_header else len(TIMING_DIMENSIONS)
+      normalized_header.insert(insert_at, "通知时机")
+
+    for row in rows:
+        analysis_object = row.get("分析对象") or row.get("通知时机")
+        analysis_type = row.get("分析类型") or "通知时机"
+        row["分析类型"] = analysis_type
+        row["通知时机"] = analysis_object
+        row.pop("分析对象", None)
+
+    return normalized_header, rows
+
+
 def build_payload(common_csv_path: Path, timing_csv_path: Path, feature_csv_path: Path | None = None):
     main_header, main_rows = read_csv_rows(common_csv_path)
     timing_header, timing_rows = read_csv_rows(timing_csv_path, rename_map={"版本": "版本号"})
+    timing_header, timing_rows = normalize_timing_table(timing_header, timing_rows)
     if feature_csv_path:
         feature_header, feature_rows = read_csv_rows(feature_csv_path, rename_map={"版本": "版本号"})
     else:
