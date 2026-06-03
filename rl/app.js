@@ -50,7 +50,7 @@ const DEFAULT_TIMING_METRICS = [
   "D0人均展示次数",
   "D0人均点击次数",
 ];
-const SERIES_COLORS = ["#d0663f", "#26547c", "#7d8f31", "#9a4d7b"];
+const SERIES_COLORS = ["#3f6f5f", "#52616f", "#8a7c60", "#6b7280"];
 const TIMING_SHORT_LABELS = {
   "监听到应用安装": ["应用", "安装"],
   "监听到应用卸载": ["应用", "卸载"],
@@ -2002,9 +2002,9 @@ function renderPaidCountrySummary(host, analysis) {
         <div class="stat-value" style="font-size:16px; margin-top:0;">top 10 国家结构</div>
         <div style="margin-top:12px; display:flex; flex-direction:column; gap:8px;">
           ${item.countryStats.map((stat, index) => `
-            <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; border-radius:12px; background:rgba(208,102,63,0.06);">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; border-radius:12px; background:rgba(63,111,95,0.06);">
               <div style="display:flex; align-items:center; gap:10px; min-width:0;">
-                <div style="width:24px; height:24px; border-radius:999px; background:rgba(208,102,63,0.12); color:#b4552f; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700;">${index + 1}</div>
+                <div style="width:24px; height:24px; border-radius:999px; background:rgba(63,111,95,0.12); color:#2f5f50; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700;">${index + 1}</div>
                 <strong style="font-size:15px; color:#24323b;">${stat.country}</strong>
               </div>
               <div style="font-size:14px; color:#5c6c76; white-space:nowrap;">${formatMetric("通知授权率_D0", stat.share)}</div>
@@ -2682,7 +2682,6 @@ function renderSingleProjectSummary(host, analysis) {
       `;
 
     host.innerHTML = `
-      <div class="${sampleAssessment.level === "high" ? "success-banner" : "warning-banner"}">${sampleAssessment.detail}</div>
       <div class="narrative-block" style="margin-bottom: 18px;">
         <h3>第一点：先排除样本量过少的版本</h3>
         <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:18px; margin-top:14px;">
@@ -2832,7 +2831,6 @@ function renderSingleProjectSummary(host, analysis) {
     : "";
 
   host.innerHTML = `
-    <div class="${sampleAssessment.level === "high" ? "success-banner" : "warning-banner"}">${sampleAssessment.detail}</div>
     ${versionSampleCards}
     <div class="stats-grid">
       ${cards.map((item) => `
@@ -4929,7 +4927,7 @@ function bootstrap() {
   ensureDefaults();
   applyWorkspaceDefaults(appState.activeWorkspace);
   document.querySelector("#data-meta").textContent =
-    `数据源：${dashboardData.workbookPath} | 生成时间：${dashboardData.generatedAt}`;
+    `最近更新时间：${dashboardData.generatedAt}`;
   document.addEventListener("click", (event) => {
     if (!event.target.closest(".multi-select-shell")) {
       document.querySelectorAll(".multi-select-shell.open").forEach((node) => node.classList.remove("open"));
