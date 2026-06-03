@@ -6,17 +6,17 @@
     <title>RL 业务分析看板</title>
     <style>
       :root {
-        --bg: #f1f4f6;
-        --bg-strong: #e3e9ed;
+        --bg: #eef7fb;
+        --bg-strong: #dceef6;
         --panel: rgba(255, 255, 255, 0.92);
         --panel-strong: rgba(255, 255, 255, 0.98);
-        --ink: #202631;
-        --muted: #687381;
-        --line: rgba(32, 38, 49, 0.1);
-        --accent: #4e6475;
-        --accent-2: #7a8794;
-        --accent-3: #65736b;
-        --shadow: 0 18px 46px rgba(32, 38, 49, 0.09);
+        --ink: #1f2d36;
+        --muted: #61727f;
+        --line: rgba(31, 45, 54, 0.1);
+        --accent: #247895;
+        --accent-2: #2f9e8f;
+        --accent-3: #d6894d;
+        --shadow: 0 18px 46px rgba(25, 72, 91, 0.1);
       }
 
       * {
@@ -27,9 +27,9 @@
         margin: 0;
         color: var(--ink);
         background:
-          radial-gradient(circle at top left, rgba(78, 100, 117, 0.1), transparent 28%),
-          radial-gradient(circle at 88% 12%, rgba(122, 135, 148, 0.08), transparent 30%),
-          linear-gradient(180deg, #fbfcfd 0%, var(--bg) 100%);
+          radial-gradient(circle at top left, rgba(36, 120, 149, 0.12), transparent 28%),
+          radial-gradient(circle at 88% 12%, rgba(47, 158, 143, 0.1), transparent 30%),
+          linear-gradient(180deg, #fbfdff 0%, var(--bg) 100%);
         font-family: "Avenir Next", "PingFang SC", "Hiragino Sans GB", sans-serif;
       }
 
@@ -93,7 +93,7 @@
         display: inline-flex;
         padding: 10px 14px;
         border-radius: 999px;
-        background: rgba(78, 100, 117, 0.08);
+        background: rgba(36, 120, 149, 0.08);
         color: var(--muted);
         font-size: 13px;
         font-weight: 700;
@@ -198,13 +198,13 @@
       }
 
       .chip.active {
-        background: linear-gradient(135deg, #4e6475, #3e5261);
+        background: linear-gradient(135deg, #247895, #1f6584);
         color: white;
         border-color: transparent;
       }
 
       .chip.subtle.active {
-        background: linear-gradient(135deg, #7a8794, #5d6974);
+        background: linear-gradient(135deg, #2f9e8f, #247f74);
       }
 
       select {
@@ -361,7 +361,7 @@
         padding: 18px;
         border-radius: 20px;
         background: linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(248, 250, 247, 0.86));
-        border: 1px solid rgba(78, 100, 117, 0.12);
+        border: 1px solid rgba(36, 120, 149, 0.12);
       }
 
       .eyebrow {
@@ -404,13 +404,13 @@
       }
 
       .warning-banner {
-        background: rgba(101, 115, 107, 0.14);
-        color: #4c5a52;
+        background: rgba(214, 137, 77, 0.16);
+        color: #925f34;
       }
 
       .success-banner {
-        background: rgba(78, 100, 117, 0.12);
-        color: #3e5261;
+        background: rgba(47, 158, 143, 0.12);
+        color: #247f74;
       }
 
       .compare-card {
@@ -471,7 +471,7 @@
       }
 
       .highlight-row {
-        background: rgba(78, 100, 117, 0.08);
+        background: rgba(36, 120, 149, 0.08);
       }
 
       .diff-cell {
@@ -512,7 +512,7 @@
         display: grid;
         place-items: center;
         border-radius: 50%;
-        background: linear-gradient(135deg, #4e6475, #3e5261);
+        background: linear-gradient(135deg, #247895, #1f6584);
         color: white;
         font-weight: 800;
       }
@@ -586,9 +586,9 @@
         padding: 22px 24px;
         border-radius: 26px;
         background:
-          radial-gradient(circle at top left, rgba(78, 100, 117, 0.08), transparent 34%),
-          linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(247, 249, 251, 0.88));
-        border: 1px solid rgba(78, 100, 117, 0.12);
+          radial-gradient(circle at top left, rgba(36, 120, 149, 0.08), transparent 34%),
+          linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(242, 250, 252, 0.88));
+        border: 1px solid rgba(36, 120, 149, 0.12);
         margin-bottom: 22px;
       }
 
@@ -624,20 +624,20 @@
         padding: 6px 10px;
         font-size: 12px;
         font-weight: 800;
-        background: rgba(78, 100, 117, 0.1);
-        color: #3e5261;
+        background: rgba(36, 120, 149, 0.1);
+        color: #1f6584;
       }
 
       .feature-token.warn {
-        background: rgba(101, 115, 107, 0.14);
-        color: #4c5a52;
+        background: rgba(214, 137, 77, 0.16);
+        color: #925f34;
       }
 
       .feature-focus {
         margin: 12px 0;
         padding: 14px 16px;
         border-radius: 18px;
-        background: rgba(78, 100, 117, 0.08);
+        background: rgba(36, 120, 149, 0.08);
         color: var(--ink);
         font-size: 15px;
         line-height: 1.65;
@@ -707,7 +707,7 @@
 
       .timing-track {
         height: 18px;
-        background: rgba(78, 100, 117, 0.08);
+        background: rgba(36, 120, 149, 0.08);
         border-radius: 999px;
         overflow: hidden;
       }
@@ -715,7 +715,7 @@
       .timing-bar {
         height: 100%;
         border-radius: 999px;
-        background: linear-gradient(90deg, #4e6475, #7a8794);
+        background: linear-gradient(90deg, #247895, #2f9e8f);
       }
 
       .timing-value {
@@ -733,7 +733,7 @@
         padding: 18px;
         border-radius: 20px;
         background: linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(244, 248, 246, 0.78));
-        border: 1px solid rgba(78, 100, 117, 0.14);
+        border: 1px solid rgba(36, 120, 149, 0.14);
       }
 
       .structure-list {
@@ -785,7 +785,7 @@
       }
 
       .workspace-chip.active {
-        background: linear-gradient(135deg, #4e6475, #3e5261);
+        background: linear-gradient(135deg, #247895, #1f6584);
         color: white;
         border-color: transparent;
       }
