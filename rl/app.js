@@ -3142,21 +3142,67 @@ function renderCompareDetails(analysis) {
     }
     const titleSuffix = selectedContext.length ? `（${selectedContext.join("，")}）` : "";
     const metricsForTable = metricsForSummary;
+    const subjectCount = group.validSubjects.length;
+    const comparisonColumns = subjectCount > 2
+      ? "<th>最优</th><th>最弱</th><th>极差</th>"
+      : subjectCount === 2
+      ? "<th>差值</th>"
+      : "";
+    const formatSignedMetricDiff = (metric, diff) => {
+      if (diff === null || diff === undefined || Number.isNaN(Number(diff))) {
+        return "NA";
+      }
+      const sign = diff > 0 ? "+" : diff < 0 ? "-" : "";
+      return `${sign}${formatMetric(metric, Math.abs(diff))}`;
+    };
     const metricRows = metricsForTable.map((metric) => {
-      const values = group.validSubjects.map((subject) => `
-        <td>${formatMetric(metric, group.aggregated[subject][metric])}</td>
-      `).join("");
-      const diffInfo = metric === "新增用户数"
-        ? {
-            kind: "count",
-            diff: Math.max(...group.validSubjects.map((subject) => group.aggregated[subject][metric] || 0)) - Math.min(...group.validSubjects.map((subject) => group.aggregated[subject][metric] || 0)),
+      const comparableValues = group.validSubjects
+        .map((subject) => {
+          const value = group.aggregated[subject][metric];
+          return value === null || value === undefined || Number.isNaN(Number(value))
+            ? null
+            : { subject, value: Number(value) };
+        })
+        .filter(Boolean);
+      const lowerBetter = metric.includes("卸载率");
+      const rankedValues = comparableValues.slice().sort((a, b) => lowerBetter ? a.value - b.value : b.value - a.value);
+      const bestValue = metric === "新增用户数" ? null : rankedValues[0] || null;
+      const weakestValue = metric === "新增用户数" ? null : rankedValues[rankedValues.length - 1] || null;
+      const rangeValue = comparableValues.length >= 2
+        ? Math.max(...comparableValues.map((item) => item.value)) - Math.min(...comparableValues.map((item) => item.value))
+        : null;
+      const values = group.validSubjects.map((subject) => {
+        const value = group.aggregated[subject][metric];
+        const isBest = bestValue && bestValue.subject === subject && rangeValue > 0;
+        const isWeakest = weakestValue && weakestValue.subject === subject && rangeValue > 0;
+        const cellClass = subjectCount > 2 && isBest
+          ? "best-value-cell"
+          : subjectCount > 2 && isWeakest
+          ? "weak-value-cell"
+          : "";
+        return `<td class="${cellClass}">${formatMetric(metric, value)}</td>`;
+      }).join("");
+      const comparisonCells = (() => {
+        if (subjectCount > 2) {
+          if (metric === "新增用户数") {
+            return `<td></td><td></td><td></td>`;
           }
-        : group.metricDiffs.find((item) => item.metric === metric);
-      const diffText = diffInfo?.kind === "rate"
-        ? `${(diffInfo.diff * 100).toFixed(2)} pct`
-        : diffInfo?.kind === "count"
-        ? Math.round(diffInfo.diff).toLocaleString("zh-CN")
-        : diffInfo?.diff?.toFixed(2) || "NA";
+          return `
+            <td class="best-summary-cell">${bestValue ? bestValue.subject : "NA"}</td>
+            <td class="weak-summary-cell">${weakestValue ? weakestValue.subject : "NA"}</td>
+            <td class="diff-cell">${rangeValue === null ? "NA" : formatMetric(metric, rangeValue)}</td>
+          `;
+        }
+        if (subjectCount === 2) {
+          const firstValue = group.aggregated[group.validSubjects[0]][metric];
+          const secondValue = group.aggregated[group.validSubjects[1]][metric];
+          const diff = firstValue === null || firstValue === undefined || secondValue === null || secondValue === undefined
+            ? null
+            : Number(secondValue) - Number(firstValue);
+          return `<td class="diff-cell">${formatSignedMetricDiff(metric, diff)}</td>`;
+        }
+        return "";
+      })();
       const rowClass = group.strongestDiff?.metric === metric || (appState.activeWorkspace === "country_opt" && metric === "新增用户数")
         ? "highlight-row"
         : "";
@@ -3164,7 +3210,7 @@ function renderCompareDetails(analysis) {
         <tr class="${rowClass}">
           <th>${metric}</th>
           ${values}
-          <td class="diff-cell">${diffText}</td>
+          ${comparisonCells}
         </tr>
       `;
     }).join("");
@@ -3174,7 +3220,6 @@ function renderCompareDetails(analysis) {
         <div class="compare-head">
           <div>
             <div class="compare-title">${group.labels.length ? group.labels.join(" / ") : "全量分组"}${titleSuffix}</div>
-            <div class="muted">最明显差异：${group.strongestDiff?.metric || "NA"}</div>
           </div>
           <div class="pill">${analysis.compareField} 对比</div>
         </div>
@@ -3184,7 +3229,7 @@ function renderCompareDetails(analysis) {
               <tr>
                 <th>指标</th>
                 ${group.validSubjects.map((subject) => `<th>${subject}</th>`).join("")}
-                <th>差值</th>
+                ${comparisonColumns}
               </tr>
             </thead>
             <tbody>${metricRows}</tbody>
