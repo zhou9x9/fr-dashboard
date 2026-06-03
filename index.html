@@ -6,17 +6,17 @@
     <title>FR 业务分析看板</title>
     <style>
       :root {
-        --bg: #f6efe4;
-        --bg-strong: #efe0cc;
-        --panel: rgba(255, 252, 246, 0.88);
-        --panel-strong: rgba(255, 247, 237, 0.96);
-        --ink: #1f2a33;
-        --muted: #5b6b73;
-        --line: rgba(31, 42, 51, 0.11);
-        --accent: #d0663f;
-        --accent-2: #26547c;
-        --accent-3: #7d8f31;
-        --shadow: 0 22px 60px rgba(85, 56, 33, 0.12);
+        --bg: #f5f7fb;
+        --bg-strong: #e8edf5;
+        --panel: rgba(255, 255, 255, 0.92);
+        --panel-strong: rgba(255, 255, 255, 0.98);
+        --ink: #17212b;
+        --muted: #64717f;
+        --line: rgba(23, 33, 43, 0.1);
+        --accent: #2563eb;
+        --accent-2: #0f766e;
+        --accent-3: #475569;
+        --shadow: 0 18px 46px rgba(15, 23, 42, 0.09);
       }
 
       * {
@@ -27,9 +27,9 @@
         margin: 0;
         color: var(--ink);
         background:
-          radial-gradient(circle at top left, rgba(208, 102, 63, 0.18), transparent 26%),
-          radial-gradient(circle at 85% 15%, rgba(38, 84, 124, 0.16), transparent 28%),
-          linear-gradient(180deg, #f8f2e8 0%, #f6efe4 100%);
+          radial-gradient(circle at top left, rgba(37, 99, 235, 0.08), transparent 28%),
+          radial-gradient(circle at 88% 12%, rgba(15, 118, 110, 0.07), transparent 30%),
+          linear-gradient(180deg, #f8fafc 0%, var(--bg) 100%);
         font-family: "Avenir Next", "PingFang SC", "Hiragino Sans GB", sans-serif;
       }
 
@@ -39,9 +39,7 @@
       }
 
       .hero {
-        display: grid;
-        grid-template-columns: 1.4fr 0.8fr;
-        gap: 20px;
+        display: block;
         margin-bottom: 20px;
       }
 
@@ -56,25 +54,17 @@
       }
 
       .hero-main {
-        padding: 30px;
+        padding: 28px 30px;
         position: relative;
         overflow: hidden;
       }
 
       .hero-main::after {
-        content: "";
-        position: absolute;
-        inset: auto -70px -80px auto;
-        width: 220px;
-        height: 220px;
-        background: radial-gradient(circle, rgba(208, 102, 63, 0.24), transparent 68%);
+        content: none;
       }
 
       .hero-side {
-        padding: 26px;
-        display: flex;
-        flex-direction: column;
-        justify-content: space-between;
+        display: none;
       }
 
       h1, h2, h3 {
@@ -84,9 +74,9 @@
       }
 
       h1 {
-        font-size: 40px;
+        font-size: 38px;
         line-height: 1.05;
-        margin-bottom: 12px;
+        margin-bottom: 0;
       }
 
       h2 {
@@ -95,20 +85,18 @@
       }
 
       .lead {
-        max-width: 780px;
-        color: var(--muted);
-        font-size: 16px;
-        line-height: 1.75;
+        display: none;
       }
 
       .meta {
-        margin-top: 20px;
+        margin-top: 16px;
         display: inline-flex;
         padding: 10px 14px;
         border-radius: 999px;
-        background: rgba(255, 255, 255, 0.72);
+        background: rgba(37, 99, 235, 0.08);
         color: var(--muted);
         font-size: 13px;
+        font-weight: 700;
       }
 
       .hero-side .mini-title {
@@ -128,14 +116,19 @@
 
       .layout {
         display: grid;
-        grid-template-columns: 360px 1fr;
+        grid-template-columns: 1fr;
         gap: 20px;
       }
 
       .sidebar {
-        display: flex;
-        flex-direction: column;
-        gap: 20px;
+        display: block;
+        overflow: visible;
+      }
+
+      .sidebar > .panel {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 16px;
         overflow: visible;
       }
 
@@ -157,9 +150,14 @@
       }
 
       .control-block + .control-block {
-        margin-top: 18px;
-        padding-top: 18px;
-        border-top: 1px solid var(--line);
+        margin-top: 0;
+        padding-top: 0;
+        border-top: 0;
+      }
+
+      .sidebar h2,
+      .control-block[data-control="compare-filter-header"] {
+        grid-column: 1 / -1;
       }
 
       .label-row {
@@ -200,13 +198,13 @@
       }
 
       .chip.active {
-        background: linear-gradient(135deg, rgba(208, 102, 63, 0.94), rgba(143, 62, 35, 0.96));
+        background: linear-gradient(135deg, #2563eb, #1d4ed8);
         color: white;
         border-color: transparent;
       }
 
       .chip.subtle.active {
-        background: linear-gradient(135deg, rgba(38, 84, 124, 0.95), rgba(17, 41, 60, 0.96));
+        background: linear-gradient(135deg, #0f766e, #115e59);
       }
 
       select {
@@ -294,7 +292,7 @@
         padding: 8px;
         border-radius: 18px;
         border: 1px solid rgba(31, 42, 51, 0.1);
-        background: rgba(255, 252, 246, 0.98);
+        background: rgba(255, 255, 255, 0.98);
         box-shadow: 0 18px 36px rgba(31, 42, 51, 0.12);
       }
 
@@ -357,8 +355,8 @@
       .stat-card {
         padding: 18px;
         border-radius: 20px;
-        background: linear-gradient(180deg, rgba(255, 252, 246, 0.98), rgba(255, 244, 230, 0.8));
-        border: 1px solid rgba(208, 102, 63, 0.14);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(248, 250, 252, 0.86));
+        border: 1px solid rgba(37, 99, 235, 0.12);
       }
 
       .eyebrow {
@@ -401,13 +399,13 @@
       }
 
       .warning-banner {
-        background: rgba(208, 102, 63, 0.14);
-        color: #8a3d22;
+        background: rgba(245, 158, 11, 0.14);
+        color: #92400e;
       }
 
       .success-banner {
-        background: rgba(125, 143, 49, 0.14);
-        color: #5f6f24;
+        background: rgba(15, 118, 110, 0.12);
+        color: #115e59;
       }
 
       .compare-card {
@@ -468,7 +466,7 @@
       }
 
       .highlight-row {
-        background: rgba(208, 102, 63, 0.09);
+        background: rgba(37, 99, 235, 0.08);
       }
 
       .diff-cell {
@@ -509,7 +507,7 @@
         display: grid;
         place-items: center;
         border-radius: 50%;
-        background: linear-gradient(135deg, rgba(38, 84, 124, 0.92), rgba(16, 40, 58, 0.95));
+        background: linear-gradient(135deg, #2563eb, #1d4ed8);
         color: white;
         font-weight: 800;
       }
@@ -704,7 +702,7 @@
 
       .timing-track {
         height: 18px;
-        background: rgba(125, 143, 49, 0.08);
+        background: rgba(37, 99, 235, 0.08);
         border-radius: 999px;
         overflow: hidden;
       }
@@ -712,7 +710,7 @@
       .timing-bar {
         height: 100%;
         border-radius: 999px;
-        background: linear-gradient(90deg, #8b9c3c, #d2a93d);
+        background: linear-gradient(90deg, #2563eb, #0f766e);
       }
 
       .timing-value {
@@ -729,8 +727,8 @@
       .structure-card {
         padding: 18px;
         border-radius: 20px;
-        background: linear-gradient(180deg, rgba(255, 252, 246, 0.98), rgba(244, 248, 239, 0.82));
-        border: 1px solid rgba(125, 143, 49, 0.18);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(240, 253, 250, 0.72));
+        border: 1px solid rgba(15, 118, 110, 0.14);
       }
 
       .structure-list {
@@ -782,7 +780,7 @@
       }
 
       .workspace-chip.active {
-        background: linear-gradient(135deg, rgba(208, 102, 63, 0.94), rgba(143, 62, 35, 0.96));
+        background: linear-gradient(135deg, #2563eb, #1d4ed8);
         color: white;
         border-color: transparent;
       }
@@ -844,23 +842,8 @@
       <section class="hero">
         <div class="hero-main">
           <h1>FR 业务分析看板</h1>
-          <div class="lead">
-            这个页面现在按分析任务来组织，而不是按一堆通用筛选来组织。你可以分别进入单项目国家对比、单项目版本对比、多项目对比和通知时机对比，用更贴近业务问题的口径去看同一份底表。
-          </div>
           <div class="meta" id="data-meta"></div>
         </div>
-        <aside class="hero-side">
-          <div>
-            <div class="mini-title">What It Is Good At</div>
-            <ul>
-              <li>单项目按国家找拖后腿的指标，服务国家优化</li>
-              <li>项目内按版本和日期看迭代效果，服务版本复盘</li>
-              <li>多项目统一口径横比，服务多包维护</li>
-              <li>专项分析通知时机的展示与点击差异</li>
-            </ul>
-          </div>
-          <div class="hint">当前所有任务页签共用同一套底层数据和加权口径：新增用户数求和，率类和均值类默认按新增用户数加权。</div>
-        </aside>
       </section>
 
       <section class="panel workspace-switcher">
