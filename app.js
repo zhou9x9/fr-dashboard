@@ -2682,7 +2682,6 @@ function renderSingleProjectSummary(host, analysis) {
       `;
 
     host.innerHTML = `
-      <div class="${sampleAssessment.level === "high" ? "success-banner" : "warning-banner"}">${sampleAssessment.detail}</div>
       <div class="narrative-block" style="margin-bottom: 18px;">
         <h3>第一点：先排除样本量过少的版本</h3>
         <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:18px; margin-top:14px;">
@@ -2832,7 +2831,6 @@ function renderSingleProjectSummary(host, analysis) {
     : "";
 
   host.innerHTML = `
-    <div class="${sampleAssessment.level === "high" ? "success-banner" : "warning-banner"}">${sampleAssessment.detail}</div>
     ${versionSampleCards}
     <div class="stats-grid">
       ${cards.map((item) => `

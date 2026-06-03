@@ -248,6 +248,7 @@
 
       .multi-select-trigger {
         width: 100%;
+        min-height: 44px;
         display: flex;
         justify-content: space-between;
         align-items: center;
@@ -265,6 +266,10 @@
       .multi-select-label {
         flex: 1;
         line-height: 1.5;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
       .multi-select-label.placeholder {
@@ -581,9 +586,9 @@
         padding: 22px 24px;
         border-radius: 26px;
         background:
-          radial-gradient(circle at top left, rgba(208, 102, 63, 0.12), transparent 34%),
-          linear-gradient(180deg, rgba(255, 252, 246, 0.98), rgba(255, 246, 235, 0.78));
-        border: 1px solid rgba(208, 102, 63, 0.16);
+          radial-gradient(circle at top left, rgba(37, 99, 235, 0.08), transparent 34%),
+          linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(248, 250, 252, 0.86));
+        border: 1px solid rgba(37, 99, 235, 0.12);
         margin-bottom: 22px;
       }
 
@@ -619,20 +624,20 @@
         padding: 6px 10px;
         font-size: 12px;
         font-weight: 800;
-        background: rgba(125, 143, 49, 0.12);
-        color: #53631f;
+        background: rgba(15, 118, 110, 0.1);
+        color: #115e59;
       }
 
       .feature-token.warn {
-        background: rgba(208, 102, 63, 0.12);
-        color: #a14526;
+        background: rgba(245, 158, 11, 0.14);
+        color: #92400e;
       }
 
       .feature-focus {
         margin: 12px 0;
         padding: 14px 16px;
         border-radius: 18px;
-        background: rgba(208, 102, 63, 0.1);
+        background: rgba(37, 99, 235, 0.08);
         color: var(--ink);
         font-size: 15px;
         line-height: 1.65;
