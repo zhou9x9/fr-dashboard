@@ -3184,7 +3184,7 @@ function renderCompareDetails(analysis) {
       }).join("");
       const comparisonCells = (() => {
         if (subjectCount > 2) {
-          if (metric === "新增用户数") {
+          if (metric === "新增用户数" || !(rangeValue > 0)) {
             return `<td></td><td></td><td></td>`;
           }
           return `
