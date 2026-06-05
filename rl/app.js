@@ -215,6 +215,10 @@ const appState = {
   hasInitializedPaidCountryProjects: false,
   countryOptTrendMetric: null,
   workspaceMemory: {},
+  sharedProjectDate: {
+    single: { project: [], firstVisitDate: [] },
+    multi: { project: [], firstVisitDate: [] },
+  },
 };
 
 function uniqueValues(rows, field) {
@@ -253,11 +257,160 @@ function saveWorkspaceMemory(workspaceKey) {
     国家: (appState.filters["国家"] || []).slice(),
     版本号: (appState.filters["版本号"] || []).slice(),
     compareMetrics: (appState.compareMetrics || []).slice(),
+    groupDimensions: (appState.groupDimensions || []).slice(),
   };
 }
 
 function getWorkspaceMemory(workspaceKey) {
   return appState.workspaceMemory[workspaceKey] || {};
+}
+
+function projectDateShareGroup(workspaceKey) {
+  if (["country_opt", "version_iteration"].includes(workspaceKey)) {
+    return "single";
+  }
+  if (["paid_country", "cross_project", "timing_special", "notification_copy", "feature_module"].includes(workspaceKey)) {
+    return "multi";
+  }
+  return null;
+}
+
+function projectDateStateRefs(workspaceKey) {
+  if (workspaceKey === "feature_module") {
+    return { projectKey: "featureProject", dateKey: "featureFirstVisitDate" };
+  }
+  if (isTimingWorkspace(workspaceKey)) {
+    return { projectKey: "timingProject", dateKey: "timingFirstVisitDate" };
+  }
+  return { projectKey: "项目代号", dateKey: "首次访问日期" };
+}
+
+function projectDateOptionsForWorkspace(workspaceKey, field) {
+  if (workspaceKey === "feature_module") {
+    return featureOptionsFor(field);
+  }
+  if (isTimingWorkspace(workspaceKey)) {
+    return timingOptionsFor(field);
+  }
+  return optionsFor(field);
+}
+
+function getProjectDateSelection(workspaceKey, field) {
+  const refs = projectDateStateRefs(workspaceKey);
+  if (workspaceKey === "feature_module" || isTimingWorkspace(workspaceKey)) {
+    const stateKey = field === "项目代号" ? refs.projectKey : refs.dateKey;
+    return (appState[stateKey] || []).slice();
+  }
+  return (appState.filters[field] || []).slice();
+}
+
+function setProjectDateSelection(workspaceKey, field, values) {
+  const refs = projectDateStateRefs(workspaceKey);
+  if (workspaceKey === "feature_module" || isTimingWorkspace(workspaceKey)) {
+    const stateKey = field === "项目代号" ? refs.projectKey : refs.dateKey;
+    appState[stateKey] = values.slice();
+    return;
+  }
+  appState.filters[field] = values.slice();
+}
+
+function applySharedProjectDateToWorkspace(workspaceKey) {
+  const group = projectDateShareGroup(workspaceKey);
+  if (!group) return;
+  const shared = appState.sharedProjectDate[group];
+  [
+    ["项目代号", "project"],
+    ["首次访问日期", "firstVisitDate"],
+  ].forEach(([field, key]) => {
+    const sharedValues = (shared[key] || []).slice();
+    if (!sharedValues.length) return;
+    const allowed = projectDateOptionsForWorkspace(workspaceKey, field);
+    let valid = sharedValues.filter((value) => allowed.includes(value));
+    if (field === "项目代号" && group === "single") {
+      valid = valid.slice(0, 1);
+    }
+    if (valid.length) {
+      setProjectDateSelection(workspaceKey, field, valid);
+    }
+  });
+}
+
+function rememberProjectDateSelection(workspaceKey, field) {
+  if (!["项目代号", "首次访问日期"].includes(field)) return;
+  const group = projectDateShareGroup(workspaceKey);
+  if (!group) return;
+  const key = field === "项目代号" ? "project" : "firstVisitDate";
+  const values = getProjectDateSelection(workspaceKey, field).filter((value) => value !== "全部");
+  if (values.length) {
+    appState.sharedProjectDate[group][key] = values.slice();
+  }
+}
+
+function formatSignedMetricDiff(metric, diff, formatter = formatMetric) {
+  if (diff === null || diff === undefined || Number.isNaN(Number(diff))) {
+    return "NA";
+  }
+  const sign = diff > 0 ? "+" : diff < 0 ? "-" : "";
+  return `${sign}${formatter(metric, Math.abs(diff))}`;
+}
+
+function comparisonColumnsForSubjects(subjectCount) {
+  if (subjectCount > 2) {
+    return "<th>最优</th><th>最弱</th><th>极差</th>";
+  }
+  if (subjectCount === 2) {
+    return "<th>差值</th>";
+  }
+  return "";
+}
+
+function comparisonCellsForMetric(subjects, metric, valueForSubject, formatter = formatMetric) {
+  if (subjects.length > 2 && metric === "新增用户数") {
+    return { cells: "<td></td><td></td><td></td>", valueClasses: new Map() };
+  }
+  const comparableValues = subjects
+    .map((subject) => {
+      const value = valueForSubject(subject);
+      return value === null || value === undefined || Number.isNaN(Number(value))
+        ? null
+        : { subject, value: Number(value) };
+    })
+    .filter(Boolean);
+  const valueClasses = new Map();
+  const rangeValue = comparableValues.length >= 2
+    ? Math.max(...comparableValues.map((item) => item.value)) - Math.min(...comparableValues.map((item) => item.value))
+    : null;
+  if (subjects.length > 2) {
+    if (!(rangeValue > 0)) {
+      return { cells: "<td></td><td></td><td></td>", valueClasses };
+    }
+    const lowerBetter = metric.includes("卸载率");
+    const rankedValues = comparableValues.slice().sort((a, b) => lowerBetter ? a.value - b.value : b.value - a.value);
+    const bestValue = rankedValues[0] || null;
+    const weakestValue = rankedValues[rankedValues.length - 1] || null;
+    if (bestValue) valueClasses.set(bestValue.subject, "best-value-cell");
+    if (weakestValue) valueClasses.set(weakestValue.subject, "weak-value-cell");
+    return {
+      valueClasses,
+      cells: `
+        <td class="best-summary-cell">${bestValue ? bestValue.subject : "NA"}</td>
+        <td class="weak-summary-cell">${weakestValue ? weakestValue.subject : "NA"}</td>
+        <td class="diff-cell">${formatter(metric, rangeValue)}</td>
+      `,
+    };
+  }
+  if (subjects.length === 2) {
+    const firstValue = valueForSubject(subjects[0]);
+    const secondValue = valueForSubject(subjects[1]);
+    const diff = firstValue === null || firstValue === undefined || secondValue === null || secondValue === undefined
+      ? null
+      : Number(secondValue) - Number(firstValue);
+    return {
+      valueClasses,
+      cells: `<td class="diff-cell">${formatSignedMetricDiff(metric, diff, formatter)}</td>`,
+    };
+  }
+  return { cells: "", valueClasses };
 }
 
 function preferredSingleProjectSelection(currentValues, allowedProjects) {
@@ -597,6 +750,7 @@ function applyFeatureDefaults(workspaceKey = appState.activeWorkspace) {
   keepValid("featureReportDate", "报表日期", featureOptionsFor("报表日期").slice(-1));
   keepValid("featureProject", "项目代号", featureOptionsFor("项目代号").slice(0, 1));
   keepValid("featureFirstVisitDate", "首次访问日期", featureOptionsFor("首次访问日期").slice(-5));
+  applySharedProjectDateToWorkspace(workspaceKey);
   keepValid("featureCountry", "国家", featureOptionsFor("国家").includes("全部") ? ["全部"] : featureOptionsFor("国家").slice(0, 1));
   keepValid("featureVersion", "版本号", featureOptionsFor("版本号").includes("全部") ? ["全部"] : featureOptionsFor("版本号").slice(0, 1));
   const analysisTypes = featureOptionsFor("分析类型");
@@ -634,6 +788,7 @@ function applyTimingDefaults(workspaceKey = appState.activeWorkspace) {
   keepValid("timingReportDate", "报表日期", timingOptionsFor("报表日期").slice(-1));
   keepValid("timingProject", "项目代号", timingOptionsFor("项目代号").includes("全部") ? ["全部"] : timingOptionsFor("项目代号").slice(0, 2));
   keepValid("timingFirstVisitDate", "首次访问日期", timingOptionsFor("首次访问日期").slice(-5));
+  applySharedProjectDateToWorkspace(workspaceKey);
   keepValid("timingVersion", "版本号", timingOptionsFor("版本号").includes("全部") ? ["全部"] : timingOptionsFor("版本号").slice(0, 1));
   keepValid("timingCountry", "国家", timingOptionsFor("国家").includes("全部") ? ["全部"] : timingOptionsFor("国家").slice(0, 1));
   const keptMetrics = (appState.timingMetrics || []).filter((metric) => dashboardData.timing.metrics.includes(metric));
@@ -764,7 +919,13 @@ function applyWorkspaceDefaults(workspaceKey) {
   appState.analysisMode = defaults.analysisMode;
   appState.compareField = defaults.compareField;
   appState.countryMode = defaults.countryMode;
-  appState.groupDimensions = defaults.groupDimensions.slice();
+  const groupOptions = (workspaceKey === "cross_project" ? ["首次访问日期", "国家"] : DIMENSION_LABELS).filter((field) => {
+    if (["报表日期", appState.compareField].includes(field)) return false;
+    if (appState.analysisMode === "single_project" && field === "项目代号") return false;
+    return true;
+  });
+  const rememberedGroups = (workspaceMemory.groupDimensions || []).filter((field) => groupOptions.includes(field));
+  appState.groupDimensions = rememberedGroups.length ? rememberedGroups : defaults.groupDimensions.slice();
   const rememberedMetrics = filteredMetrics(workspaceMemory.compareMetrics || []);
   appState.compareMetrics = rememberedMetrics.length ? rememberedMetrics : filteredMetrics(defaults.compareMetrics);
   const keepValidSelections = (field, fallbackValues) => {
@@ -783,6 +944,7 @@ function applyWorkspaceDefaults(workspaceKey) {
       keepValidSelections("项目代号", optionsFor("项目代号").filter((item) => item !== "全部"));
     }
     keepValidSelections("首次访问日期", optionsFor("首次访问日期").slice(-5));
+    applySharedProjectDateToWorkspace(workspaceKey);
     const versions = versionOptionsForRows(baseRowsForAnalysis());
     keepValidSelections("版本号", versions.length ? versions : defaultRecentVersionValues());
   }
@@ -791,6 +953,7 @@ function applyWorkspaceDefaults(workspaceKey) {
     appState.filters["项目代号"] = preferredSingleProjectSelection(appState.filters["项目代号"], projects);
     keepValidSelections("报表日期", optionsFor("报表日期").slice(-1));
     keepValidSelections("首次访问日期", optionsFor("首次访问日期").slice(-5));
+    applySharedProjectDateToWorkspace(workspaceKey);
     const countryOptions = getCountryUniverse("国家", appState.compareValues, baseRowsForAnalysis());
     const rememberedCountries = (workspaceMemory["国家"] || []).filter((item) => countryOptions.includes(item));
     appState.filters["国家"] = rememberedCountries.length ? rememberedCountries : countryOptions.slice(0, 1);
@@ -805,6 +968,7 @@ function applyWorkspaceDefaults(workspaceKey) {
     appState.filters["项目代号"] = preferredSingleProjectSelection(appState.filters["项目代号"], projects);
     keepValidSelections("报表日期", optionsFor("报表日期").slice(-1));
     keepValidSelections("首次访问日期", optionsFor("首次访问日期").slice(-5));
+    applySharedProjectDateToWorkspace(workspaceKey);
     const countryOptions = getCountryUniverse("版本号", appState.compareValues, baseRowsForAnalysis());
     const rememberedCountries = (workspaceMemory["国家"] || []).filter((item) => countryOptions.includes(item));
     appState.filters["国家"] = rememberedCountries.length
@@ -827,6 +991,7 @@ function applyWorkspaceDefaults(workspaceKey) {
     const validProjects = (appState.filters["项目代号"] || []).filter((item) => allowedProjects.includes(item));
     appState.filters["项目代号"] = validProjects.length ? validProjects.slice(0, 2) : allowedProjects.slice(0, 2);
     keepValidSelections("首次访问日期", optionsFor("首次访问日期").slice(-5));
+    applySharedProjectDateToWorkspace(workspaceKey);
     appState.filters["版本号"] = ["全部"];
     const sharedCountries = getCountryUniverse("项目代号", appState.filters["项目代号"], baseRowsForAnalysis());
     const rememberedCountries = (workspaceMemory["国家"] || []).filter((item) => sharedCountries.includes(item));
@@ -835,7 +1000,7 @@ function applyWorkspaceDefaults(workspaceKey) {
       : (sharedCountries.includes("全部") ? ["全部"] : sharedCountries.slice(0, 1));
     appState.compareValues = appState.filters["项目代号"].slice();
   }
-  if (workspaceKey === "version_iteration") {
+  if (workspaceKey === "version_iteration" || workspaceKey === "cross_project") {
     return;
   }
   const compareDefaults = compareCandidateValues(baseRowsForAnalysis(), appState.compareField);
@@ -3143,66 +3308,19 @@ function renderCompareDetails(analysis) {
     const titleSuffix = selectedContext.length ? `（${selectedContext.join("，")}）` : "";
     const metricsForTable = metricsForSummary;
     const subjectCount = group.validSubjects.length;
-    const comparisonColumns = subjectCount > 2
-      ? "<th>最优</th><th>最弱</th><th>极差</th>"
-      : subjectCount === 2
-      ? "<th>差值</th>"
-      : "";
-    const formatSignedMetricDiff = (metric, diff) => {
-      if (diff === null || diff === undefined || Number.isNaN(Number(diff))) {
-        return "NA";
-      }
-      const sign = diff > 0 ? "+" : diff < 0 ? "-" : "";
-      return `${sign}${formatMetric(metric, Math.abs(diff))}`;
-    };
+    const comparisonColumns = comparisonColumnsForSubjects(subjectCount);
     const metricRows = metricsForTable.map((metric) => {
-      const comparableValues = group.validSubjects
-        .map((subject) => {
-          const value = group.aggregated[subject][metric];
-          return value === null || value === undefined || Number.isNaN(Number(value))
-            ? null
-            : { subject, value: Number(value) };
-        })
-        .filter(Boolean);
-      const lowerBetter = metric.includes("卸载率");
-      const rankedValues = comparableValues.slice().sort((a, b) => lowerBetter ? a.value - b.value : b.value - a.value);
-      const bestValue = metric === "新增用户数" ? null : rankedValues[0] || null;
-      const weakestValue = metric === "新增用户数" ? null : rankedValues[rankedValues.length - 1] || null;
-      const rangeValue = comparableValues.length >= 2
-        ? Math.max(...comparableValues.map((item) => item.value)) - Math.min(...comparableValues.map((item) => item.value))
-        : null;
+      const comparisonInfo = comparisonCellsForMetric(
+        group.validSubjects,
+        metric,
+        (subject) => group.aggregated[subject]?.[metric],
+        formatMetric
+      );
       const values = group.validSubjects.map((subject) => {
         const value = group.aggregated[subject][metric];
-        const isBest = bestValue && bestValue.subject === subject && rangeValue > 0;
-        const isWeakest = weakestValue && weakestValue.subject === subject && rangeValue > 0;
-        const cellClass = subjectCount > 2 && isBest
-          ? "best-value-cell"
-          : subjectCount > 2 && isWeakest
-          ? "weak-value-cell"
-          : "";
+        const cellClass = comparisonInfo.valueClasses.get(subject) || "";
         return `<td class="${cellClass}">${formatMetric(metric, value)}</td>`;
       }).join("");
-      const comparisonCells = (() => {
-        if (subjectCount > 2) {
-          if (metric === "新增用户数" || !(rangeValue > 0)) {
-            return `<td></td><td></td><td></td>`;
-          }
-          return `
-            <td class="best-summary-cell">${bestValue ? bestValue.subject : "NA"}</td>
-            <td class="weak-summary-cell">${weakestValue ? weakestValue.subject : "NA"}</td>
-            <td class="diff-cell">${rangeValue === null ? "NA" : formatMetric(metric, rangeValue)}</td>
-          `;
-        }
-        if (subjectCount === 2) {
-          const firstValue = group.aggregated[group.validSubjects[0]][metric];
-          const secondValue = group.aggregated[group.validSubjects[1]][metric];
-          const diff = firstValue === null || firstValue === undefined || secondValue === null || secondValue === undefined
-            ? null
-            : Number(secondValue) - Number(firstValue);
-          return `<td class="diff-cell">${formatSignedMetricDiff(metric, diff)}</td>`;
-        }
-        return "";
-      })();
       const rowClass = group.strongestDiff?.metric === metric || (appState.activeWorkspace === "country_opt" && metric === "新增用户数")
         ? "highlight-row"
         : "";
@@ -3210,7 +3328,7 @@ function renderCompareDetails(analysis) {
         <tr class="${rowClass}">
           <th>${metric}</th>
           ${values}
-          ${comparisonCells}
+          ${comparisonInfo.cells}
         </tr>
       `;
     }).join("");
@@ -3811,15 +3929,28 @@ function renderTiming() {
 
   const timingCards = detailGroups.map((group) => {
     const detailMetrics = dashboardData.timing.metrics.filter((metric) => !metric.startsWith("D2"));
-    const metricRows = detailMetrics.map((metric) => `
-      <tr>
-        <th>${metric}</th>
-        ${subjects.map((subject) => {
-          const subjectData = group.subjects.find((item) => item.subject === subject.subject);
-          return `<td>${subjectData ? formatMetric(metric, subjectData.aggregated[metric]) : "NA"}</td>`;
-        }).join("")}
-      </tr>
-    `).join("");
+    const subjectKeys = subjects.map((subject) => subject.subject);
+    const subjectDataByKey = new Map(group.subjects.map((item) => [item.subject, item]));
+    const comparisonColumns = comparisonColumnsForSubjects(subjectKeys.length);
+    const metricRows = detailMetrics.map((metric) => {
+      const comparisonInfo = comparisonCellsForMetric(
+        subjectKeys,
+        metric,
+        (subject) => subjectDataByKey.get(subject)?.aggregated?.[metric],
+        formatMetric
+      );
+      return `
+        <tr>
+          <th>${metric}</th>
+          ${subjectKeys.map((subject) => {
+            const subjectData = subjectDataByKey.get(subject);
+            const cellClass = comparisonInfo.valueClasses.get(subject) || "";
+            return `<td class="${cellClass}">${subjectData ? formatMetric(metric, subjectData.aggregated[metric]) : "NA"}</td>`;
+          }).join("")}
+          ${comparisonInfo.cells}
+        </tr>
+      `;
+    }).join("");
     return `
       <article class="compare-card">
         <div class="compare-head">
@@ -3834,7 +3965,8 @@ function renderTiming() {
             <thead>
               <tr>
                 <th>指标</th>
-                ${subjects.map((subject) => `<th>${subject.subject}</th>`).join("")}
+                ${subjectKeys.map((subject) => `<th>${subject}</th>`).join("")}
+                ${comparisonColumns}
               </tr>
             </thead>
             <tbody>${metricRows}</tbody>
@@ -4279,6 +4411,9 @@ function renderFeature() {
         columns.push({ value, day, rows: valueRows, label: `${value}_${day}` });
       });
     });
+    const columnLabels = columns.map((column) => column.label);
+    const columnsByLabel = new Map(columns.map((column) => [column.label, column]));
+    const comparisonColumns = comparisonColumnsForSubjects(columnLabels.length);
     const filterLabels = [];
     if (!groupFields.includes("国家")) {
       filterLabels.push(`国家: ${(appState.featureCountry || []).join("、") || "全部"}`);
@@ -4287,18 +4422,44 @@ function renderFeature() {
       filterLabels.push(`版本号: ${(appState.featureVersion || []).join("、") || "全部"}`);
     }
     const titleLabels = [...group.labels, ...filterLabels];
+    const usersComparison = comparisonCellsForMetric(
+      columnLabels,
+      "新增用户数",
+      (label) => featureUsersForRows(columnsByLabel.get(label)?.rows || []),
+      featureValue
+    );
     const usersRow = `
       <tr>
         <th>新增用户数</th>
-        ${columns.map((column) => `<td>${featureValue("新增用户数", featureUsersForRows(column.rows))}</td>`).join("")}
+        ${columns.map((column) => {
+          const cellClass = usersComparison.valueClasses.get(column.label) || "";
+          return `<td class="${cellClass}">${featureValue("新增用户数", featureUsersForRows(column.rows))}</td>`;
+        }).join("")}
+        ${usersComparison.cells}
       </tr>
     `;
-    const rowsHtml = objectNames.map((object) => `
-      <tr>
-        <th>${object}</th>
-        ${columns.map((column) => `<td>${featureValue(column.day, weightedFeatureValue(column.rows, object, column.day))}</td>`).join("")}
-      </tr>
-    `).join("");
+    const rowsHtml = objectNames.map((object) => {
+      const comparisonMetric = selectedDays[0] || "D0";
+      const comparisonInfo = comparisonCellsForMetric(
+        columnLabels,
+        comparisonMetric,
+        (label) => {
+          const column = columnsByLabel.get(label);
+          return column ? weightedFeatureValue(column.rows, object, column.day) : null;
+        },
+        featureValue
+      );
+      return `
+        <tr>
+          <th>${object}</th>
+          ${columns.map((column) => {
+            const cellClass = comparisonInfo.valueClasses.get(column.label) || "";
+            return `<td class="${cellClass}">${featureValue(column.day, weightedFeatureValue(column.rows, object, column.day))}</td>`;
+          }).join("")}
+          ${comparisonInfo.cells}
+        </tr>
+      `;
+    }).join("");
     return `
       <article class="compare-card">
         <div class="compare-head">
@@ -4314,6 +4475,7 @@ function renderFeature() {
               <tr>
                 <th>分析对象</th>
                 ${columns.map((column) => `<th>${column.label}</th>`).join("")}
+                ${comparisonColumns}
               </tr>
             </thead>
             <tbody>${usersRow}${rowsHtml}</tbody>
@@ -4373,6 +4535,7 @@ function renderFeatureControls() {
         } else {
           appState[stateKey] = values.length ? values : items.slice(0, 1);
         }
+        rememberProjectDateSelection(appState.activeWorkspace, field);
         rerender();
       },
       {
@@ -4593,6 +4756,7 @@ function buildControlSection() {
             appState.filters[field] = items.slice(0, isSingleProjectField ? 1 : items.length);
           }
         }
+        rememberProjectDateSelection(appState.activeWorkspace, field);
         const shouldResetCompareValues =
           field === appState.compareField ||
           (field === "项目代号" && appState.analysisMode === "single_project");
@@ -4919,6 +5083,7 @@ function buildControlSection() {
         } else {
           appState[stateKey] = values;
         }
+        rememberProjectDateSelection(appState.activeWorkspace, field);
         rerender();
       },
       {
