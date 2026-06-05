@@ -50,7 +50,7 @@ const DEFAULT_TIMING_METRICS = [
   "D0人均展示次数",
   "D0人均点击次数",
 ];
-const SERIES_COLORS = ["#1d6f96", "#d47a3a", "#2f9e8f", "#7c5cc4", "#c95f7b", "#6f8f35", "#3f5aa9", "#b8862f"];
+const SERIES_COLORS = ["#2563eb", "#0f766e", "#64748b", "#f59e0b"];
 const TIMING_SHORT_LABELS = {
   "监听到应用安装": ["应用", "安装"],
   "监听到应用卸载": ["应用", "卸载"],
@@ -2002,9 +2002,9 @@ function renderPaidCountrySummary(host, analysis) {
         <div class="stat-value" style="font-size:16px; margin-top:0;">top 10 国家结构</div>
         <div style="margin-top:12px; display:flex; flex-direction:column; gap:8px;">
           ${item.countryStats.map((stat, index) => `
-            <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; border-radius:12px; background:rgba(36,120,149,0.06);">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; border-radius:12px; background:rgba(37,99,235,0.06);">
               <div style="display:flex; align-items:center; gap:10px; min-width:0;">
-                <div style="width:24px; height:24px; border-radius:999px; background:rgba(36,120,149,0.12); color:#1f6584; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700;">${index + 1}</div>
+                <div style="width:24px; height:24px; border-radius:999px; background:rgba(37,99,235,0.12); color:#1d4ed8; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700;">${index + 1}</div>
                 <strong style="font-size:15px; color:#24323b;">${stat.country}</strong>
               </div>
               <div style="font-size:14px; color:#5c6c76; white-space:nowrap;">${formatMetric("通知授权率_D0", stat.share)}</div>
@@ -2080,10 +2080,10 @@ function paidCountryLineChartSvg(country, dates, series) {
       .map((point) => `${xForIndex(point.index)},${yForValue(point.value)}`)
       .join(" ");
     const circles = validPoints
-      .map((point) => `<circle cx="${xForIndex(point.index)}" cy="${yForValue(point.value)}" r="4.2" fill="${color}" />`)
+      .map((point) => `<circle cx="${xForIndex(point.index)}" cy="${yForValue(point.value)}" r="3.5" fill="${color}" />`)
       .join("");
     return `
-      <polyline fill="none" stroke="${color}" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round" points="${polyline}" />
+      <polyline fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" points="${polyline}" />
       ${circles}
     `;
   }).join("");
@@ -2151,10 +2151,10 @@ function countryOptMetricLineChartSvg(metric, dates, series) {
       .map((point) => `${xForIndex(point.index)},${yForValue(point.value)}`)
       .join(" ");
     const circles = validPoints
-      .map((point) => `<circle cx="${xForIndex(point.index)}" cy="${yForValue(point.value)}" r="4.2" fill="${color}" />`)
+      .map((point) => `<circle cx="${xForIndex(point.index)}" cy="${yForValue(point.value)}" r="3.5" fill="${color}" />`)
       .join("");
     return `
-      <polyline fill="none" stroke="${color}" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round" points="${polyline}" />
+      <polyline fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" points="${polyline}" />
       ${circles}
     `;
   }).join("");
@@ -2419,7 +2419,7 @@ function renderCountryOptimizationSummary(host, analysis) {
       card: "background:rgba(234,88,12,0.08); border:1px solid rgba(234,88,12,0.16); border-radius:18px; padding:14px 16px;",
     },
     P2: {
-      badge: "background:#1f6584; color:#fff;",
+      badge: "background:#1d4ed8; color:#fff;",
       card: "background:rgba(59,130,246,0.08); border:1px solid rgba(59,130,246,0.16); border-radius:18px; padding:14px 16px;",
     },
     OK: {
