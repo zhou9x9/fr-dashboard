@@ -11,6 +11,8 @@ BASE_DIR = Path(__file__).resolve().parent
 COMMON_CSV_PATH = Path("/Users/macseven1seven/Downloads/FR07_FR08_feishu_common_export_2026-04-21.csv")
 TIMING_CSV_PATH = Path("/Users/macseven1seven/Downloads/FR07_FR08_feishu_timing_export_2026-04-21.csv")
 OUTPUT_PATH = BASE_DIR / "data.js"
+TIMING_OUTPUT_PATH = BASE_DIR / "timing_data.js"
+FEATURE_OUTPUT_PATH = BASE_DIR / "feature_data.js"
 
 MAIN_DIMENSIONS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号"]
 TIMING_DIMENSIONS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号", "分析类型", "通知时机"]
@@ -190,11 +192,25 @@ def parse_args():
 def main():
     args = parse_args()
     payload = build_payload(args.common, args.timing, args.feature)
+    timing_payload = payload.pop("timing")
+    feature_payload = payload.pop("feature")
     args.output.write_text(
         "window.FR_DASHBOARD_DATA = " + json.dumps(payload, ensure_ascii=False) + ";\n",
         encoding="utf-8",
     )
+    timing_output = args.output.with_name("timing_data.js")
+    feature_output = args.output.with_name("feature_data.js")
+    timing_output.write_text(
+        "window.FR_DASHBOARD_DATA.timing = " + json.dumps(timing_payload, ensure_ascii=False) + ";\n",
+        encoding="utf-8",
+    )
+    feature_output.write_text(
+        "window.FR_DASHBOARD_DATA.feature = " + json.dumps(feature_payload, ensure_ascii=False) + ";\n",
+        encoding="utf-8",
+    )
     print(f"wrote {args.output}")
+    print(f"wrote {timing_output}")
+    print(f"wrote {feature_output}")
 
 
 if __name__ == "__main__":

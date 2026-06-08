@@ -1120,7 +1120,11 @@
           document.body.appendChild(script);
         }
         loadScript("./data.js", function () {
-          loadScript("./app.js");
+          loadScript("./timing_data.js", function () {
+            loadScript("./feature_data.js", function () {
+              loadScript("./app.js");
+            });
+          });
         });
       })();
     </script>
