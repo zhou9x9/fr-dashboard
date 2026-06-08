@@ -12,6 +12,7 @@ const DIMENSION_FIELDS = ["报表日期", "项目代号", "首次访问日期", 
 const RATE_METRICS = ["event_success_rate", "user_success_rate", "event_fail_rate", "user_fail_rate"].filter((metric) =>
   dashboardData.metrics.includes(metric)
 );
+const REQUIRED_SPLIT_FIELDS = ["国家", "版本号"];
 const CONTROL_CONFIGS = [
   { key: "报表日期", label: "报表日期", type: "filter" },
   { key: "项目代号", label: "项目代号", type: "filter" },
@@ -83,7 +84,14 @@ function sortValues(field, values) {
 }
 
 function optionsFor(field) {
-  return sortValues(field, uniqueValues(dashboardData.rows, field));
+  const values = uniqueValues(dashboardData.rows, field);
+  if (field === "项目代号") {
+    return sortValues(field, values.filter((value) => value !== "ALL" && value !== "全部"));
+  }
+  if (field === "版本号") {
+    return sortValues(field, values.filter((value) => value !== "ALL" && value !== "全部")).slice(-5);
+  }
+  return sortValues(field, values);
 }
 
 function metricLabel(metric) {
@@ -92,7 +100,7 @@ function metricLabel(metric) {
 
 function optionsForControl(config) {
   if (config.type === "split") {
-    return dashboardData.splitDimensions || [];
+    return splitDimensionOptions();
   }
   if (config.type === "metrics") {
     return RATE_METRICS;
@@ -134,7 +142,7 @@ function controlSummary(config, selected, options) {
   if (!selected.length) {
     return "未选择";
   }
-  if (selected.length === options.length) {
+  if (options.length > 1 && selected.length === options.length) {
     return "全部";
   }
   if (selected.length <= 2) {
@@ -155,10 +163,16 @@ function initDefaults() {
   state.filters["项目代号"] = projects.slice(0, 1);
   state.filters["首次访问日期"] = firstVisitDates.slice(-5);
   state.filters["国家"] = countries.includes("ALL") ? ["ALL"] : countries.slice(0, 1);
-  state.filters["版本号"] = versions.includes("ALL") ? ["ALL"] : versions.slice(-2);
+  state.filters["版本号"] = versions.slice(-1);
   state.filters["API"] = apis.slice(0, 1);
-  state.splitDimensions = ["API", "国家", "版本号"].filter((field) => (dashboardData.splitDimensions || []).includes(field));
+  state.splitDimensions = ["API"].filter((field) => splitDimensionOptions().includes(field));
   state.metrics = RATE_METRICS.slice();
+}
+
+function splitDimensionOptions() {
+  return (dashboardData.splitDimensions || [])
+    .filter((field) => !REQUIRED_SPLIT_FIELDS.includes(field))
+    .filter((field) => optionsFor(field).length > 1);
 }
 
 function selectedSet(config) {
@@ -260,7 +274,7 @@ function formatRate(value) {
 
 function activeSplitDimensions(rows) {
   const fields = new Set(state.splitDimensions);
-  ["国家", "版本号", "API"].forEach((field) => {
+  REQUIRED_SPLIT_FIELDS.forEach((field) => {
     if ((state.filters[field] || []).length > 1) {
       fields.add(field);
     }

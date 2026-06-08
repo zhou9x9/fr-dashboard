@@ -120,10 +120,13 @@ def row_key(row: dict[str, Any]) -> tuple[Any, ...]:
     return tuple(row.get(field) for field in DIMENSIONS)
 
 
-def collect_csv_paths(input_dir: Path, pattern: str) -> list[Path]:
+def collect_csv_paths(input_dir: Path, pattern: str, include_history: bool = False) -> list[Path]:
     if input_dir.is_file():
         return [input_dir]
-    return sorted(path for path in input_dir.rglob(pattern) if path.is_file())
+    paths = sorted(path for path in input_dir.rglob(pattern) if path.is_file())
+    if include_history or not paths:
+        return paths
+    return [paths[-1]]
 
 
 def build_payload(csv_paths: list[Path]) -> dict[str, Any]:
@@ -165,12 +168,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input-dir", type=Path, default=DEFAULT_INPUT_DIR, help="Directory or CSV file to read.")
     parser.add_argument("--glob", default=DEFAULT_GLOB, help="CSV glob used when --input-dir is a directory.")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT, help="Generated data.js path.")
+    parser.add_argument("--include-history", action="store_true", help="Read all matched historical attachments.")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    csv_paths = collect_csv_paths(args.input_dir, args.glob)
+    csv_paths = collect_csv_paths(args.input_dir, args.glob, args.include_history)
     if not csv_paths:
         raise FileNotFoundError(f"No CSV files matched {args.glob!r} under {args.input_dir}")
 
