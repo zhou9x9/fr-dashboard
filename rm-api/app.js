@@ -89,7 +89,9 @@ function optionsFor(field) {
     return sortValues(field, values.filter((value) => value !== "ALL" && value !== "全部"));
   }
   if (field === "版本号") {
-    return sortValues(field, values.filter((value) => value !== "ALL" && value !== "全部")).slice(-5);
+    const allValues = values.filter((value) => value === "ALL" || value === "全部");
+    const latestVersions = sortValues(field, values.filter((value) => value !== "ALL" && value !== "全部")).slice(-5);
+    return [...allValues, ...latestVersions];
   }
   return sortValues(field, values);
 }
@@ -163,7 +165,7 @@ function initDefaults() {
   state.filters["项目代号"] = projects.slice(0, 1);
   state.filters["首次访问日期"] = firstVisitDates.slice(-5);
   state.filters["国家"] = countries.includes("ALL") ? ["ALL"] : countries.slice(0, 1);
-  state.filters["版本号"] = versions.slice(-1);
+  state.filters["版本号"] = versions.includes("ALL") ? ["ALL"] : versions.slice(-1);
   state.filters["API"] = apis.slice(0, 1);
   state.splitDimensions = ["API"].filter((field) => splitDimensionOptions().includes(field));
   state.metrics = RATE_METRICS.slice();
