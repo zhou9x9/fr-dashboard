@@ -493,7 +493,7 @@ function renderChart(rows) {
   };
   const yForValue = (value) => margin.top + innerHeight - (Number(value) / yMax) * innerHeight;
   const yTicks = Array.from({ length: 6 }, (_, index) => (yMax * index) / 5);
-  const xTicks = tickIndexes(xValues.length, 8);
+  const xTicks = Array.from({ length: xValues.length }, (_, index) => index);
 
   const grid = yTicks
     .map((tick) => {
@@ -507,9 +507,10 @@ function renderChart(rows) {
   const xLabels = xTicks
     .map((index) => {
       const x = xForIndex(index);
+      const anchor = index === 0 ? "start" : index === xValues.length - 1 ? "end" : "middle";
       return `
         <line x1="${x}" y1="${height - margin.bottom}" x2="${x}" y2="${height - margin.bottom + 6}" class="axis-tick" />
-        <text x="${x}" y="${height - margin.bottom + 24}" text-anchor="middle" class="axis-label">${escapeHtml(xValues[index])}</text>
+        <text x="${x}" y="${height - margin.bottom + 24}" text-anchor="${anchor}" class="axis-label">${escapeHtml(xValues[index])}</text>
       `;
     })
     .join("");
@@ -585,13 +586,39 @@ function buildDetailGroups(rows) {
   });
   return [...groupMap.values()].sort((a, b) => {
     for (let index = 0; index < a.values.length; index += 1) {
-      const diff = String(a.values[index]).localeCompare(String(b.values[index]), "zh-Hans-CN", { numeric: true });
+      const field = fields[index] || "";
+      const left = String(a.values[index]);
+      const right = String(b.values[index]);
+      const diff = field.includes("日期")
+        ? right.localeCompare(left, "zh-Hans-CN", { numeric: true })
+        : left.localeCompare(right, "zh-Hans-CN", { numeric: true });
       if (diff !== 0) {
         return diff;
       }
     }
     return a.label.localeCompare(b.label, "zh-Hans-CN", { numeric: true });
   });
+}
+
+function selectedTitlePart(field) {
+  const values = state.filters[field] || [];
+  if (!values.length) {
+    return `${field}: 全部`;
+  }
+  if (values.length <= 3) {
+    return `${field}: ${values.join("/")}`;
+  }
+  return `${field}: ${values.slice(0, 3).join("/")} +${values.length - 3}`;
+}
+
+function detailGroupTitle(groupLabel, groupFields) {
+  const context = ["国家", "版本号"]
+    .filter((field) => !groupFields.includes(field))
+    .map(selectedTitlePart);
+  if (groupLabel === "汇总") {
+    return context.length ? context.join(" / ") : groupLabel;
+  }
+  return [groupLabel, ...context].join(" / ");
 }
 
 function apiMetricTableHtml(rows) {
@@ -637,6 +664,7 @@ function apiMetricTableHtml(rows) {
 function renderDetailTable(rows) {
   const host = document.querySelector("#detail-table");
   const countNode = document.querySelector("#detail-count");
+  const groupFields = detailSplitDimensions();
   const detailGroups = buildDetailGroups(rows);
   const visibleGroups = detailGroups.slice(0, 80);
   const extraCount = detailGroups.length - visibleGroups.length;
@@ -645,7 +673,7 @@ function renderDetailTable(rows) {
     return `
       <article class="detail-group">
         <div class="detail-group-head">
-          <h3>${escapeHtml(group.label)}</h3>
+          <h3>${escapeHtml(detailGroupTitle(group.label, groupFields))}</h3>
           <span>${table.apiCount} 个 API</span>
         </div>
         <div class="table-wrap inner-table-wrap">${table.html}</div>
