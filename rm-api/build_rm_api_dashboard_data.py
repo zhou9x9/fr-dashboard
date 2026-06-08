@@ -13,7 +13,7 @@ DEFAULT_OUTPUT = Path("rm_api_dashboard") / "data.js"
 DEFAULT_GLOB = "RM06B_api_d0_export_*.csv"
 
 DIMENSIONS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号", "API"]
-SPLIT_DIMENSIONS = ["项目代号", "API", "国家", "版本号", "报表日期"]
+SPLIT_DIMENSIONS = ["首次访问日期", "国家", "版本号", "报表日期", "项目代号"]
 METRICS = ["event_success_rate", "user_success_rate", "event_fail_rate", "user_fail_rate"]
 
 METRIC_META = {

@@ -12,7 +12,8 @@ const DIMENSION_FIELDS = ["报表日期", "项目代号", "首次访问日期", 
 const RATE_METRICS = ["event_success_rate", "user_success_rate", "event_fail_rate", "user_fail_rate"].filter((metric) =>
   dashboardData.metrics.includes(metric)
 );
-const REQUIRED_SPLIT_FIELDS = ["国家", "版本号"];
+const CHART_SPLIT_FIELDS = ["API", "国家", "版本号"];
+const DETAIL_SPLIT_FIELDS = ["首次访问日期", "国家", "版本号", "报表日期", "项目代号"];
 const CONTROL_CONFIGS = [
   { key: "报表日期", label: "报表日期", type: "filter" },
   { key: "项目代号", label: "项目代号", type: "filter" },
@@ -51,6 +52,7 @@ const state = {
   splitDimensions: [],
   metrics: [],
   openControl: null,
+  selectScrollTops: {},
 };
 
 function escapeHtml(value) {
@@ -70,6 +72,9 @@ function sortValues(field, values) {
   if (field.includes("日期")) {
     return copy.sort();
   }
+  if (field === "国家") {
+    return sortCountriesByUsers(copy);
+  }
   if (field === "国家" || field === "版本号") {
     const allValues = copy.filter((value) => value === "ALL" || value === "全部");
     const rest = copy
@@ -81,6 +86,56 @@ function sortValues(field, values) {
     return copy.sort((a, b) => String(a).localeCompare(String(b), "zh-Hans-CN", { numeric: true }));
   }
   return copy.sort((a, b) => String(a).localeCompare(String(b), "zh-Hans-CN", { numeric: true }));
+}
+
+function countryUserTotals() {
+  const totals = new Map();
+  const bestRows = new Map();
+  dashboardData.rows.forEach((row) => {
+    const country = row["国家"];
+    if (!country || country === "ALL" || country === "全部") {
+      return;
+    }
+    const version = row["版本号"];
+    if (version !== "ALL" && version !== "全部") {
+      return;
+    }
+    const key = [row["报表日期"], row["项目代号"], row["首次访问日期"], country].join("||");
+    const users = Number(row.new_users || 0);
+    if (!bestRows.has(key) || users > bestRows.get(key)) {
+      bestRows.set(key, users);
+    }
+  });
+  bestRows.forEach((users, key) => {
+    const country = key.split("||")[3];
+    totals.set(country, (totals.get(country) || 0) + users);
+  });
+  if (totals.size) {
+    return totals;
+  }
+  dashboardData.rows.forEach((row) => {
+    const country = row["国家"];
+    if (!country || country === "ALL" || country === "全部") {
+      return;
+    }
+    totals.set(country, (totals.get(country) || 0) + Number(row.new_users || 0));
+  });
+  return totals;
+}
+
+function sortCountriesByUsers(values) {
+  const totals = countryUserTotals();
+  const allValues = values.filter((value) => value === "ALL" || value === "全部");
+  const rest = values
+    .filter((value) => value !== "ALL" && value !== "全部")
+    .sort((a, b) => {
+      const totalDiff = (totals.get(b) || 0) - (totals.get(a) || 0);
+      if (totalDiff !== 0) {
+        return totalDiff;
+      }
+      return String(a).localeCompare(String(b), "zh-Hans-CN", { numeric: true });
+    });
+  return [...allValues, ...rest];
 }
 
 function optionsFor(field) {
@@ -167,13 +222,14 @@ function initDefaults() {
   state.filters["国家"] = countries.includes("ALL") ? ["ALL"] : countries.slice(0, 1);
   state.filters["版本号"] = versions.includes("ALL") ? ["ALL"] : versions.slice(-1);
   state.filters["API"] = apis.slice(0, 1);
-  state.splitDimensions = ["API"].filter((field) => splitDimensionOptions().includes(field));
+  state.splitDimensions = ["首次访问日期"].filter((field) => splitDimensionOptions().includes(field));
   state.metrics = RATE_METRICS.slice();
 }
 
 function splitDimensionOptions() {
-  return (dashboardData.splitDimensions || [])
-    .filter((field) => !REQUIRED_SPLIT_FIELDS.includes(field))
+  const available = dashboardData.splitDimensions?.length ? dashboardData.splitDimensions : DETAIL_SPLIT_FIELDS;
+  return DETAIL_SPLIT_FIELDS
+    .filter((field) => available.includes(field) && dashboardData.dimensions.includes(field))
     .filter((field) => optionsFor(field).length > 1);
 }
 
@@ -221,6 +277,31 @@ function renderControls() {
       </div>
     `;
   }).join("");
+  restoreOpenSelectScroll(container);
+}
+
+function rememberOpenSelectScroll() {
+  if (!state.openControl) {
+    return;
+  }
+  const controls = [...document.querySelectorAll(".multi-control")];
+  const node = controls.find((item) => item.dataset.control === state.openControl);
+  const list = node?.querySelector(".option-list");
+  if (list) {
+    state.selectScrollTops[state.openControl] = list.scrollTop;
+  }
+}
+
+function restoreOpenSelectScroll(container = document) {
+  if (!state.openControl) {
+    return;
+  }
+  const controls = [...container.querySelectorAll(".multi-control")];
+  const node = controls.find((item) => item.dataset.control === state.openControl);
+  const list = node?.querySelector(".option-list");
+  if (list) {
+    list.scrollTop = state.selectScrollTops[state.openControl] || 0;
+  }
 }
 
 function matchesFilter(row, field) {
@@ -275,15 +356,15 @@ function formatRate(value) {
 }
 
 function activeSplitDimensions(rows) {
-  const fields = new Set(state.splitDimensions);
-  REQUIRED_SPLIT_FIELDS.forEach((field) => {
+  const fields = new Set();
+  CHART_SPLIT_FIELDS.forEach((field) => {
     if ((state.filters[field] || []).length > 1) {
       fields.add(field);
     }
   });
   return [...fields].filter((field) => {
     if (!dashboardData.splitDimensions.includes(field)) {
-      return false;
+      return dashboardData.dimensions.includes(field);
     }
     return uniqueValues(rows, field).length > 1 || (state.filters[field] || []).length > 1;
   });
@@ -365,6 +446,17 @@ function tickIndexes(length, maxTicks) {
   return [...result].sort((a, b) => a - b);
 }
 
+function lineStyleForMetric(metric) {
+  return metric.includes("fail") ? "dashed" : "solid";
+}
+
+function legendSwatchStyle(metric, color) {
+  if (lineStyleForMetric(metric) === "dashed") {
+    return `background: repeating-linear-gradient(to right, ${color} 0 7px, transparent 7px 12px);`;
+  }
+  return `background: ${color};`;
+}
+
 function renderChart(rows) {
   const chartNode = document.querySelector("#line-chart");
   const legendNode = document.querySelector("#chart-legend");
@@ -424,7 +516,7 @@ function renderChart(rows) {
   const lines = series
     .map((item, index) => {
       const color = COLOR_PALETTE[index % COLOR_PALETTE.length];
-      const dash = item.metric.includes("fail") ? " stroke-dasharray=\"7 5\"" : "";
+      const dash = lineStyleForMetric(item.metric) === "dashed" ? " stroke-dasharray=\"7 5\"" : "";
       const points = item.points
         .map((value, pointIndex) => {
           if (!Number.isFinite(Number(value))) {
@@ -457,7 +549,7 @@ function renderChart(rows) {
   legendNode.innerHTML = series
     .map((item, index) => `
       <span class="legend-item">
-        <i style="background:${COLOR_PALETTE[index % COLOR_PALETTE.length]}"></i>
+        <i style="${legendSwatchStyle(item.metric, COLOR_PALETTE[index % COLOR_PALETTE.length])}"></i>
         ${escapeHtml(item.label)}
       </span>
     `)
@@ -465,9 +557,44 @@ function renderChart(rows) {
   countNode.textContent = `${rows.length.toLocaleString("zh-CN")} 条记录 · ${series.length} 条线`;
 }
 
-function renderDetailTable(rows) {
-  const table = document.querySelector("#detail-table");
-  const countNode = document.querySelector("#detail-count");
+function detailSplitDimensions() {
+  const options = splitDimensionOptions();
+  return state.splitDimensions.filter((field) => options.includes(field) && field !== "API");
+}
+
+function detailGroupLabel(fields, row) {
+  if (!fields.length) {
+    return "汇总";
+  }
+  return fields.map((field) => `${field}: ${row[field] || "ALL"}`).join(" / ");
+}
+
+function buildDetailGroups(rows) {
+  const fields = detailSplitDimensions();
+  const groupMap = new Map();
+  rows.forEach((row) => {
+    const key = fields.length ? JSON.stringify(fields.map((field) => row[field] || "ALL")) : "__all__";
+    if (!groupMap.has(key)) {
+      groupMap.set(key, {
+        label: detailGroupLabel(fields, row),
+        rows: [],
+        values: fields.map((field) => row[field] || "ALL"),
+      });
+    }
+    groupMap.get(key).rows.push(row);
+  });
+  return [...groupMap.values()].sort((a, b) => {
+    for (let index = 0; index < a.values.length; index += 1) {
+      const diff = String(a.values[index]).localeCompare(String(b.values[index]), "zh-Hans-CN", { numeric: true });
+      if (diff !== 0) {
+        return diff;
+      }
+    }
+    return a.label.localeCompare(b.label, "zh-Hans-CN", { numeric: true });
+  });
+}
+
+function apiMetricTableHtml(rows) {
   const groups = new Map();
   rows.forEach((row) => {
     const api = row["API"];
@@ -501,8 +628,40 @@ function renderDetailTable(rows) {
     })
     .join("");
 
-  table.innerHTML = header + `<tbody>${body || `<tr><td colspan="${RATE_METRICS.length + 1}" class="empty-table">当前筛选下暂无数据</td></tr>`}</tbody>`;
-  countNode.textContent = `${apiOrder.length} 个 API`;
+  return {
+    apiCount: apiOrder.length,
+    html: `<table>${header}<tbody>${body || `<tr><td colspan="${RATE_METRICS.length + 1}" class="empty-table">当前筛选下暂无数据</td></tr>`}</tbody></table>`,
+  };
+}
+
+function renderDetailTable(rows) {
+  const host = document.querySelector("#detail-table");
+  const countNode = document.querySelector("#detail-count");
+  const detailGroups = buildDetailGroups(rows);
+  const visibleGroups = detailGroups.slice(0, 80);
+  const extraCount = detailGroups.length - visibleGroups.length;
+  const cards = visibleGroups.map((group) => {
+    const table = apiMetricTableHtml(group.rows);
+    return `
+      <article class="detail-group">
+        <div class="detail-group-head">
+          <h3>${escapeHtml(group.label)}</h3>
+          <span>${table.apiCount} 个 API</span>
+        </div>
+        <div class="table-wrap inner-table-wrap">${table.html}</div>
+      </article>
+    `;
+  }).join("");
+
+  host.innerHTML = `
+    <div class="detail-stack">
+      ${cards || `<div class="empty-state">当前筛选下暂无数据</div>`}
+      ${extraCount > 0 ? `<div class="empty-state compact">当前拆分组合较多，已先显示前 80 组，还有 ${extraCount} 组未展开。</div>` : ""}
+    </div>
+  `;
+  countNode.textContent = detailGroups.length <= 1
+    ? `${apiMetricTableHtml(rows).apiCount} 个 API`
+    : `${detailGroups.length} 个分组`;
 }
 
 function renderMeta() {
@@ -526,6 +685,7 @@ function configForKey(key) {
 function handleControlClick(event) {
   const trigger = event.target.closest("[data-trigger]");
   if (trigger) {
+    rememberOpenSelectScroll();
     const key = trigger.dataset.trigger;
     state.openControl = state.openControl === key ? null : key;
     renderControls();
@@ -541,6 +701,7 @@ function handleControlClick(event) {
     return;
   }
   const options = optionsForControl(config);
+  rememberOpenSelectScroll();
   setSelectedForControl(config, action.dataset.action === "select-all" ? options : []);
   state.openControl = config.key;
   renderAll();
@@ -551,6 +712,7 @@ function handleControlChange(event) {
   if (!input) {
     return;
   }
+  rememberOpenSelectScroll();
   const config = configForKey(input.dataset.controlKey);
   if (!config) {
     return;
