@@ -2,19 +2,52 @@ const dashboardData = window.RM_API_DASHBOARD_DATA || {
   generatedAt: "",
   sourceFiles: [],
   dimensions: ["报表日期", "项目代号", "首次访问日期", "国家", "版本号", "API"],
-  splitDimensions: ["项目代号", "API", "国家", "版本号", "报表日期"],
+  splitDimensions: ["首次访问日期", "国家", "版本号", "报表日期", "项目代号"],
   metrics: ["event_success_rate", "user_success_rate", "event_fail_rate", "user_fail_rate"],
   metricMeta: {},
   rows: [],
+  eventParameter: {
+    sourceFiles: [],
+    dimensions: ["报表日期", "项目代号", "首次访问日期", "版本号", "国家", "事件名"],
+    parameterFields: [
+      { key: "api", label: "API" },
+      { key: "reason", label: "reason" },
+      { key: "message", label: "message" },
+    ],
+    metrics: [
+      { key: "event_count", label: "事件数", kind: "count" },
+      { key: "total_users", label: "用户数", kind: "count" },
+    ],
+    rows: [],
+  },
 };
 
+const eventParameterData = dashboardData.eventParameter || {
+  sourceFiles: [],
+  dimensions: ["报表日期", "项目代号", "首次访问日期", "版本号", "国家", "事件名"],
+  parameterFields: [
+    { key: "api", label: "API" },
+    { key: "reason", label: "reason" },
+    { key: "message", label: "message" },
+  ],
+  metrics: [
+    { key: "event_count", label: "事件数", kind: "count" },
+    { key: "total_users", label: "用户数", kind: "count" },
+  ],
+  rows: [],
+};
+
+const MENU_API = "api";
+const MENU_EVENT_PARAMETER = "event_parameter";
 const DIMENSION_FIELDS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号", "API"];
+const EVENT_PARAMETER_DIMENSION_FIELDS = ["报表日期", "项目代号", "首次访问日期", "版本号", "国家", "事件名"];
+const ALL_FILTER_FIELDS = [...new Set([...DIMENSION_FIELDS, ...EVENT_PARAMETER_DIMENSION_FIELDS])];
 const RATE_METRICS = ["event_success_rate", "user_success_rate", "event_fail_rate", "user_fail_rate"].filter((metric) =>
   dashboardData.metrics.includes(metric)
 );
 const CHART_SPLIT_FIELDS = ["API", "国家", "版本号"];
 const DETAIL_SPLIT_FIELDS = ["首次访问日期", "国家", "版本号", "报表日期", "项目代号"];
-const CONTROL_CONFIGS = [
+const API_CONTROL_CONFIGS = [
   { key: "报表日期", label: "报表日期", type: "filter" },
   { key: "项目代号", label: "项目代号", type: "filter" },
   { key: "首次访问日期", label: "首次访问日期", type: "filter", tall: true },
@@ -23,6 +56,14 @@ const CONTROL_CONFIGS = [
   { key: "API", label: "API", type: "filter", tall: true },
   { key: "splitDimensions", label: "拆分维度", type: "split" },
   { key: "metrics", label: "关注指标", type: "metrics" },
+];
+const EVENT_PARAMETER_CONTROL_CONFIGS = [
+  { key: "报表日期", label: "报表日期", type: "filter" },
+  { key: "项目代号", label: "项目代号", type: "filter" },
+  { key: "首次访问日期", label: "首次访问日期", type: "filter", tall: true },
+  { key: "版本号", label: "版本号", type: "filter" },
+  { key: "国家", label: "国家", type: "filter" },
+  { key: "事件名", label: "事件名", type: "filter", tall: true },
 ];
 const FIELD_SHORT_LABELS = {
   报表日期: "报表",
@@ -48,7 +89,8 @@ const COLOR_PALETTE = [
 ];
 
 const state = {
-  filters: Object.fromEntries(DIMENSION_FIELDS.map((field) => [field, []])),
+  activeMenu: MENU_API,
+  filters: Object.fromEntries(ALL_FILTER_FIELDS.map((field) => [field, []])),
   splitDimensions: [],
   metrics: [],
   openControl: null,
@@ -63,41 +105,37 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
+function isAllValue(value) {
+  return value === "ALL" || value === "全部";
+}
+
+function activeData() {
+  return state.activeMenu === MENU_EVENT_PARAMETER ? eventParameterData : dashboardData;
+}
+
+function activeRows() {
+  return activeData().rows || [];
+}
+
+function activeDimensionFields() {
+  return state.activeMenu === MENU_EVENT_PARAMETER ? EVENT_PARAMETER_DIMENSION_FIELDS : DIMENSION_FIELDS;
+}
+
+function activeControlConfigs() {
+  return state.activeMenu === MENU_EVENT_PARAMETER ? EVENT_PARAMETER_CONTROL_CONFIGS : API_CONTROL_CONFIGS;
+}
+
 function uniqueValues(rows, field) {
   return [...new Set(rows.map((row) => row[field]))].filter((value) => value !== null && value !== undefined && value !== "");
 }
 
-function sortValues(field, values) {
-  const copy = values.slice();
-  if (field.includes("日期")) {
-    return copy.sort();
-  }
-  if (field === "国家") {
-    return sortCountriesByUsers(copy);
-  }
-  if (field === "国家" || field === "版本号") {
-    const allValues = copy.filter((value) => value === "ALL" || value === "全部");
-    const rest = copy
-      .filter((value) => value !== "ALL" && value !== "全部")
-      .sort((a, b) => String(a).localeCompare(String(b), "zh-Hans-CN", { numeric: true }));
-    return [...allValues, ...rest];
-  }
-  if (field === "项目代号") {
-    return copy.sort((a, b) => String(a).localeCompare(String(b), "zh-Hans-CN", { numeric: true }));
-  }
-  return copy.sort((a, b) => String(a).localeCompare(String(b), "zh-Hans-CN", { numeric: true }));
-}
-
-function countryUserTotals() {
+function countryUserTotals(rows) {
   const totals = new Map();
   const bestRows = new Map();
+
   dashboardData.rows.forEach((row) => {
     const country = row["国家"];
-    if (!country || country === "ALL" || country === "全部") {
-      return;
-    }
-    const version = row["版本号"];
-    if (version !== "ALL" && version !== "全部") {
+    if (!country || isAllValue(country) || !isAllValue(row["版本号"])) {
       return;
     }
     const key = [row["报表日期"], row["项目代号"], row["首次访问日期"], country].join("||");
@@ -110,24 +148,26 @@ function countryUserTotals() {
     const country = key.split("||")[3];
     totals.set(country, (totals.get(country) || 0) + users);
   });
+
   if (totals.size) {
     return totals;
   }
-  dashboardData.rows.forEach((row) => {
+
+  rows.forEach((row) => {
     const country = row["国家"];
-    if (!country || country === "ALL" || country === "全部") {
+    if (!country || isAllValue(country)) {
       return;
     }
-    totals.set(country, (totals.get(country) || 0) + Number(row.new_users || 0));
+    totals.set(country, (totals.get(country) || 0) + Number(row.new_users || row.total_users || 0));
   });
   return totals;
 }
 
-function sortCountriesByUsers(values) {
-  const totals = countryUserTotals();
-  const allValues = values.filter((value) => value === "ALL" || value === "全部");
+function sortCountriesByUsers(values, rows) {
+  const totals = countryUserTotals(rows);
+  const allValues = values.filter(isAllValue);
   const rest = values
-    .filter((value) => value !== "ALL" && value !== "全部")
+    .filter((value) => !isAllValue(value))
     .sort((a, b) => {
       const totalDiff = (totals.get(b) || 0) - (totals.get(a) || 0);
       if (totalDiff !== 0) {
@@ -138,17 +178,38 @@ function sortCountriesByUsers(values) {
   return [...allValues, ...rest];
 }
 
-function optionsFor(field) {
-  const values = uniqueValues(dashboardData.rows, field);
-  if (field === "项目代号") {
-    return sortValues(field, values.filter((value) => value !== "ALL" && value !== "全部"));
+function sortValues(field, values, rows = activeRows()) {
+  const copy = values.slice();
+  if (field.includes("日期")) {
+    return copy.sort();
+  }
+  if (field === "国家") {
+    return sortCountriesByUsers(copy, rows);
   }
   if (field === "版本号") {
-    const allValues = values.filter((value) => value === "ALL" || value === "全部");
-    const latestVersions = sortValues(field, values.filter((value) => value !== "ALL" && value !== "全部")).slice(-5);
+    const allValues = copy.filter(isAllValue);
+    const rest = copy
+      .filter((value) => !isAllValue(value))
+      .sort((a, b) => String(a).localeCompare(String(b), "zh-Hans-CN", { numeric: true }));
+    return [...allValues, ...rest];
+  }
+  if (field === "项目代号") {
+    return copy.sort((a, b) => String(a).localeCompare(String(b), "zh-Hans-CN", { numeric: true }));
+  }
+  return copy.sort((a, b) => String(a).localeCompare(String(b), "zh-Hans-CN", { numeric: true }));
+}
+
+function optionsFor(field, rows = activeRows()) {
+  const values = uniqueValues(rows, field);
+  if (field === "项目代号") {
+    return sortValues(field, values.filter((value) => !isAllValue(value)), rows);
+  }
+  if (field === "版本号") {
+    const allValues = values.filter(isAllValue);
+    const latestVersions = sortValues(field, values.filter((value) => !isAllValue(value)), rows).slice(-5);
     return [...allValues, ...latestVersions];
   }
-  return sortValues(field, values);
+  return sortValues(field, values, rows);
 }
 
 function metricLabel(metric) {
@@ -162,7 +223,7 @@ function optionsForControl(config) {
   if (config.type === "metrics") {
     return RATE_METRICS;
   }
-  return optionsFor(config.key);
+  return optionsFor(config.key, activeRows());
 }
 
 function selectedForControl(config) {
@@ -209,12 +270,15 @@ function controlSummary(config, selected, options) {
 }
 
 function initDefaults() {
-  const reportDates = optionsFor("报表日期");
-  const projects = optionsFor("项目代号");
-  const firstVisitDates = optionsFor("首次访问日期");
-  const countries = optionsFor("国家");
-  const versions = optionsFor("版本号");
-  const apis = optionsFor("API");
+  const apiRows = dashboardData.rows || [];
+  const eventRows = eventParameterData.rows || [];
+  const reportDates = optionsFor("报表日期", apiRows);
+  const projects = optionsFor("项目代号", apiRows);
+  const firstVisitDates = optionsFor("首次访问日期", apiRows);
+  const countries = optionsFor("国家", apiRows);
+  const versions = optionsFor("版本号", apiRows);
+  const apis = optionsFor("API", apiRows);
+  const eventNames = optionsFor("事件名", eventRows);
 
   state.filters["报表日期"] = reportDates.slice(-1);
   state.filters["项目代号"] = projects.slice(0, 1);
@@ -222,6 +286,7 @@ function initDefaults() {
   state.filters["国家"] = countries.includes("ALL") ? ["ALL"] : countries.slice(0, 1);
   state.filters["版本号"] = versions.includes("ALL") ? ["ALL"] : versions.slice(-1);
   state.filters["API"] = apis.slice(0, 1);
+  state.filters["事件名"] = eventNames.slice(0, 1);
   state.splitDimensions = ["首次访问日期"].filter((field) => splitDimensionOptions().includes(field));
   state.metrics = RATE_METRICS.slice();
 }
@@ -230,16 +295,24 @@ function splitDimensionOptions() {
   const available = dashboardData.splitDimensions?.length ? dashboardData.splitDimensions : DETAIL_SPLIT_FIELDS;
   return DETAIL_SPLIT_FIELDS
     .filter((field) => available.includes(field) && dashboardData.dimensions.includes(field))
-    .filter((field) => optionsFor(field).length > 1);
+    .filter((field) => optionsFor(field, dashboardData.rows || []).length > 1);
 }
 
 function selectedSet(config) {
   return new Set(selectedForControl(config));
 }
 
+function renderMenu() {
+  document.querySelectorAll("[data-menu]").forEach((item) => {
+    const active = item.dataset.menu === state.activeMenu;
+    item.classList.toggle("active", active);
+    item.setAttribute("aria-current", active ? "page" : "false");
+  });
+}
+
 function renderControls() {
   const container = document.querySelector("#filters");
-  container.innerHTML = CONTROL_CONFIGS.map((config) => {
+  container.innerHTML = activeControlConfigs().map((config) => {
     const options = optionsForControl(config);
     const selected = selectedForControl(config).filter((value) => options.includes(value));
     setSelectedForControl(config, selected);
@@ -310,7 +383,8 @@ function matchesFilter(row, field) {
 }
 
 function filteredRows() {
-  return dashboardData.rows.filter((row) => DIMENSION_FIELDS.every((field) => matchesFilter(row, field)));
+  const fields = activeDimensionFields();
+  return activeRows().filter((row) => fields.every((field) => matchesFilter(row, field)));
 }
 
 function sumField(rows, field) {
@@ -355,6 +429,10 @@ function formatRate(value) {
   return `${(Number(value) * 100).toFixed(2)}%`;
 }
 
+function formatCount(value) {
+  return Number(value || 0).toLocaleString("zh-CN");
+}
+
 function activeSplitDimensions(rows) {
   const fields = new Set();
   CHART_SPLIT_FIELDS.forEach((field) => {
@@ -386,7 +464,7 @@ function seriesLabel(metric, splitFields, row, rows) {
 }
 
 function buildSeries(rows) {
-  const xValues = sortValues("首次访问日期", uniqueValues(rows, "首次访问日期"));
+  const xValues = sortValues("首次访问日期", uniqueValues(rows, "首次访问日期"), rows);
   const splitFields = activeSplitDimensions(rows);
   const seriesMap = new Map();
 
@@ -432,18 +510,6 @@ function linePath(points, xForIndex, yForValue) {
     commands.push(`${command}${xForIndex(index).toFixed(2)},${yForValue(value).toFixed(2)}`);
   });
   return commands.join(" ");
-}
-
-function tickIndexes(length, maxTicks) {
-  if (length <= maxTicks) {
-    return Array.from({ length }, (_, index) => index);
-  }
-  const result = new Set([0, length - 1]);
-  const step = (length - 1) / (maxTicks - 1);
-  for (let index = 1; index < maxTicks - 1; index += 1) {
-    result.add(Math.round(index * step));
-  }
-  return [...result].sort((a, b) => a - b);
 }
 
 function lineStyleForMetric(metric) {
@@ -631,7 +697,7 @@ function apiMetricTableHtml(rows) {
     groups.get(api).push(row);
   });
 
-  const apiOrder = optionsFor("API").filter((api) => groups.has(api));
+  const apiOrder = optionsFor("API", dashboardData.rows || []).filter((api) => groups.has(api));
   const header = `
     <thead>
       <tr>
@@ -692,22 +758,127 @@ function renderDetailTable(rows) {
     : `${detailGroups.length} 个分组`;
 }
 
+function eventParameterFields() {
+  return eventParameterData.parameterFields?.length
+    ? eventParameterData.parameterFields
+    : [
+        { key: "api", label: "API" },
+        { key: "reason", label: "reason" },
+        { key: "message", label: "message" },
+      ];
+}
+
+function buildEventParameterItems(rows) {
+  const groups = new Map();
+  rows.forEach((row) => {
+    eventParameterFields().forEach((field) => {
+      const value = row[field.key];
+      if (value === null || value === undefined || String(value).trim() === "") {
+        return;
+      }
+      const key = `${field.key}||${String(value)}`;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          parameterName: field.label || field.key,
+          parameterValue: String(value),
+          eventCount: 0,
+          totalUsers: 0,
+        });
+      }
+      const item = groups.get(key);
+      item.eventCount += Number(row.event_count || 0);
+      item.totalUsers += Number(row.total_users || 0);
+    });
+  });
+  return [...groups.values()].sort((a, b) => {
+    const eventDiff = b.eventCount - a.eventCount;
+    if (eventDiff !== 0) {
+      return eventDiff;
+    }
+    const userDiff = b.totalUsers - a.totalUsers;
+    if (userDiff !== 0) {
+      return userDiff;
+    }
+    const nameDiff = a.parameterName.localeCompare(b.parameterName, "zh-Hans-CN", { numeric: true });
+    if (nameDiff !== 0) {
+      return nameDiff;
+    }
+    return a.parameterValue.localeCompare(b.parameterValue, "zh-Hans-CN", { numeric: true });
+  });
+}
+
+function renderEventParameterDetail(rows) {
+  const host = document.querySelector("#detail-table");
+  const countNode = document.querySelector("#detail-count");
+  const items = buildEventParameterItems(rows);
+  const visibleItems = items.slice(0, 1000);
+  const extraCount = items.length - visibleItems.length;
+  const context = ["事件名", "国家", "版本号"].map(selectedTitlePart).join(" / ");
+  const body = visibleItems
+    .map((item) => `
+      <tr>
+        <td class="api-cell">${escapeHtml(item.parameterName)}</td>
+        <td class="param-value-cell">${escapeHtml(item.parameterValue)}</td>
+        <td class="number-cell">${formatCount(item.eventCount)}</td>
+        <td class="number-cell">${formatCount(item.totalUsers)}</td>
+      </tr>
+    `)
+    .join("");
+
+  host.innerHTML = `
+    <div class="detail-stack">
+      <article class="detail-group">
+        <div class="detail-group-head">
+          <h3>${escapeHtml(context)}</h3>
+          <span>${items.length.toLocaleString("zh-CN")} 个参数值</span>
+        </div>
+        <div class="table-wrap inner-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>参数名</th>
+                <th>参数值</th>
+                <th>事件数</th>
+                <th>用户数</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${body || `<tr><td colspan="4" class="empty-table">当前筛选下暂无数据</td></tr>`}
+            </tbody>
+          </table>
+        </div>
+      </article>
+      ${extraCount > 0 ? `<div class="empty-state compact">参数值较多，已先显示前 1000 条，还有 ${extraCount} 条未展开。</div>` : ""}
+    </div>
+  `;
+  countNode.textContent = `${items.length.toLocaleString("zh-CN")} 个参数值`;
+}
+
 function renderMeta() {
+  const data = activeData();
   document.querySelector("#generated-at").textContent = dashboardData.generatedAt || "未生成";
-  document.querySelector("#source-count").textContent = `${(dashboardData.sourceFiles || []).length} 个附件`;
-  document.querySelector("#row-count").textContent = `${dashboardData.rows.length.toLocaleString("zh-CN")} 行`;
+  document.querySelector("#source-count").textContent = `${(data.sourceFiles || []).length} 个附件`;
+  document.querySelector("#row-count").textContent = `${(data.rows || []).length.toLocaleString("zh-CN")} 行`;
 }
 
 function renderAll() {
+  renderMenu();
   renderControls();
   const rows = filteredRows();
-  renderChart(rows);
-  renderDetailTable(rows);
+  const chartPanel = document.querySelector("#chart-panel");
+  if (state.activeMenu === MENU_EVENT_PARAMETER) {
+    chartPanel.hidden = true;
+    renderEventParameterDetail(rows);
+  } else {
+    chartPanel.hidden = false;
+    renderChart(rows);
+    renderDetailTable(rows);
+  }
   renderMeta();
 }
 
 function configForKey(key) {
-  return CONTROL_CONFIGS.find((config) => config.key === key);
+  return activeControlConfigs().find((config) => config.key === key);
 }
 
 function handleControlClick(event) {
@@ -760,9 +931,27 @@ function handleControlChange(event) {
   renderAll();
 }
 
+function handleMenuClick(event) {
+  const item = event.target.closest("[data-menu]");
+  if (!item) {
+    return;
+  }
+  event.preventDefault();
+  if (item.dataset.menu === state.activeMenu) {
+    return;
+  }
+  rememberOpenSelectScroll();
+  state.activeMenu = item.dataset.menu;
+  state.openControl = null;
+  state.selectScrollTops = {};
+  renderAll();
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   initDefaults();
   const filters = document.querySelector("#filters");
+  const tabs = document.querySelector(".tabs");
+  tabs.addEventListener("click", handleMenuClick);
   filters.addEventListener("click", (event) => {
     event.stopPropagation();
     handleControlClick(event);

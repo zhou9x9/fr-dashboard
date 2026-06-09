@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>RM API 数据看板</title>
+    <title>RM 数据看板</title>
     <style>
       :root {
         --bg: #f4f6fa;
@@ -91,13 +91,22 @@
 
       .tab {
         min-width: 86px;
+        border: 0;
         border-radius: 6px;
+        background: transparent;
         padding: 9px 12px;
         color: var(--muted);
+        cursor: pointer;
+        font: inherit;
         text-align: center;
         text-decoration: none;
         font-size: 13px;
         font-weight: 750;
+      }
+
+      .tab:not(.active):hover {
+        background: #eef4ff;
+        color: var(--accent);
       }
 
       .tab.active {
@@ -400,6 +409,13 @@
         font-weight: 750;
       }
 
+      .param-value-cell {
+        max-width: 720px;
+        white-space: normal;
+        word-break: break-word;
+        text-align: left;
+      }
+
       .number-cell.is-focused {
         color: var(--accent);
         font-weight: 750;
@@ -463,7 +479,7 @@
     <div class="page-shell">
       <header class="topbar">
         <div>
-          <h1>RM API 数据看板</h1>
+          <h1>RM 数据看板</h1>
           <div class="meta-row">
             <span>生成时间：<b id="generated-at">加载中</b></span>
             <span id="source-count">0 个附件</span>
@@ -471,12 +487,13 @@
           </div>
         </div>
         <nav class="tabs" aria-label="RM 看板菜单">
-          <a class="tab active" href="./">API数据</a>
+          <button class="tab active" type="button" data-menu="api" aria-current="page">API数据</button>
+          <button class="tab" type="button" data-menu="event_parameter" aria-current="false">事件参数</button>
         </nav>
       </header>
 
       <main class="stack">
-        <section class="panel">
+        <section id="chart-panel" class="panel">
           <div class="panel-head">
             <h2>控制台</h2>
           </div>
