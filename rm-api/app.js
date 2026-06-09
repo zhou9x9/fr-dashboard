@@ -41,7 +41,8 @@ const MENU_API = "api";
 const MENU_EVENT_PARAMETER = "event_parameter";
 const DIMENSION_FIELDS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号", "API"];
 const EVENT_PARAMETER_DIMENSION_FIELDS = ["报表日期", "项目代号", "首次访问日期", "版本号", "国家", "事件名"];
-const ALL_FILTER_FIELDS = [...new Set([...DIMENSION_FIELDS, ...EVENT_PARAMETER_DIMENSION_FIELDS])];
+const EVENT_PARAMETER_FILTER_FIELDS = [...EVENT_PARAMETER_DIMENSION_FIELDS, "api"];
+const ALL_FILTER_FIELDS = [...new Set([...DIMENSION_FIELDS, ...EVENT_PARAMETER_FILTER_FIELDS])];
 const RATE_METRICS = ["event_success_rate", "user_success_rate", "event_fail_rate", "user_fail_rate"].filter((metric) =>
   dashboardData.metrics.includes(metric)
 );
@@ -64,6 +65,7 @@ const EVENT_PARAMETER_CONTROL_CONFIGS = [
   { key: "版本号", label: "版本号", type: "filter" },
   { key: "国家", label: "国家", type: "filter" },
   { key: "事件名", label: "事件名", type: "filter", tall: true },
+  { key: "api", label: "API", type: "filter", tall: true },
 ];
 const FIELD_SHORT_LABELS = {
   报表日期: "报表",
@@ -118,7 +120,7 @@ function activeRows() {
 }
 
 function activeDimensionFields() {
-  return state.activeMenu === MENU_EVENT_PARAMETER ? EVENT_PARAMETER_DIMENSION_FIELDS : DIMENSION_FIELDS;
+  return state.activeMenu === MENU_EVENT_PARAMETER ? EVENT_PARAMETER_FILTER_FIELDS : DIMENSION_FIELDS;
 }
 
 function activeControlConfigs() {
@@ -279,6 +281,7 @@ function initDefaults() {
   const versions = optionsFor("版本号", apiRows);
   const apis = optionsFor("API", apiRows);
   const eventNames = optionsFor("事件名", eventRows);
+  const eventApis = optionsFor("api", eventRows);
 
   state.filters["报表日期"] = reportDates.slice(-1);
   state.filters["项目代号"] = projects.slice(0, 1);
@@ -287,6 +290,7 @@ function initDefaults() {
   state.filters["版本号"] = versions.includes("ALL") ? ["ALL"] : versions.slice(-1);
   state.filters["API"] = apis.slice(0, 1);
   state.filters["事件名"] = eventNames.slice(0, 1);
+  state.filters["api"] = eventApis.slice();
   state.splitDimensions = ["首次访问日期"].filter((field) => splitDimensionOptions().includes(field));
   state.metrics = RATE_METRICS.slice();
 }
@@ -382,8 +386,21 @@ function matchesFilter(row, field) {
   return !selected.length || selected.includes(row[field]);
 }
 
+function matchesEventParameterFilter(row, field) {
+  if (field === "api") {
+    const value = row[field];
+    if (value === null || value === undefined || String(value).trim() === "") {
+      return true;
+    }
+  }
+  return matchesFilter(row, field);
+}
+
 function filteredRows() {
   const fields = activeDimensionFields();
+  if (state.activeMenu === MENU_EVENT_PARAMETER) {
+    return activeRows().filter((row) => fields.every((field) => matchesEventParameterFilter(row, field)));
+  }
   return activeRows().filter((row) => fields.every((field) => matchesFilter(row, field)));
 }
 
@@ -702,6 +719,7 @@ function apiMetricTableHtml(rows) {
     <thead>
       <tr>
         <th>API</th>
+        <th>新增用户数</th>
         ${RATE_METRICS.map((metric) => `<th>${escapeHtml(metricLabel(metric))}</th>`).join("")}
       </tr>
     </thead>
@@ -712,6 +730,7 @@ function apiMetricTableHtml(rows) {
       return `
         <tr>
           <td class="api-cell">${escapeHtml(api)}</td>
+          <td class="number-cell">${formatCount(sumField(apiRows, "new_users"))}</td>
           ${RATE_METRICS.map((metric) => {
             const activeClass = state.metrics.includes(metric) ? " is-focused" : "";
             return `<td class="number-cell${activeClass}">${formatRate(aggregateMetric(metric, apiRows))}</td>`;
@@ -723,7 +742,7 @@ function apiMetricTableHtml(rows) {
 
   return {
     apiCount: apiOrder.length,
-    html: `<table>${header}<tbody>${body || `<tr><td colspan="${RATE_METRICS.length + 1}" class="empty-table">当前筛选下暂无数据</td></tr>`}</tbody></table>`,
+    html: `<table>${header}<tbody>${body || `<tr><td colspan="${RATE_METRICS.length + 2}" class="empty-table">当前筛选下暂无数据</td></tr>`}</tbody></table>`,
   };
 }
 
@@ -845,13 +864,13 @@ function renderEventParameterDetail(rows) {
           <span>${items.length.toLocaleString("zh-CN")} 个参数值</span>
         </div>
         <div class="table-wrap inner-table-wrap">
-          <table>
+          <table class="event-parameter-table">
             <thead>
               <tr>
                 <th>事件名</th>
-                ${parameterFields.map((field) => `<th>${escapeHtml(field.label || field.key)}</th>`).join("")}
-                <th>事件数</th>
-                <th>用户数</th>
+                ${parameterFields.map((field) => `<th class="param-header-cell">${escapeHtml(field.label || field.key)}</th>`).join("")}
+                <th class="number-header-cell">事件数</th>
+                <th class="number-header-cell">用户数</th>
               </tr>
             </thead>
             <tbody>
