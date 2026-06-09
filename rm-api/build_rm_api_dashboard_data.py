@@ -11,7 +11,7 @@ from typing import Any
 
 DEFAULT_INPUT_DIR = Path("rm06b_api_attachments")
 DEFAULT_OUTPUT = Path("rm_api_dashboard") / "data.js"
-DEFAULT_GLOB = "RM06B_api_d0_export_*.csv"
+DEFAULT_GLOB = "RM06B_api_d0_*.csv"
 DEFAULT_EVENT_PARAMETER_GLOB = "RM06B_event_parameter_*.csv"
 
 DIMENSIONS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号", "API"]
@@ -125,8 +125,15 @@ def report_date_from_path(path: Path) -> str | None:
     return None
 
 
+def project_code_from_path(path: Path) -> str | None:
+    match = re.search(r"(RM\d+[A-Z]?)", path.name, flags=re.IGNORECASE)
+    return match.group(1).upper() if match else None
+
+
 def read_csv_rows(path: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    default_report_date = report_date_from_path(path)
+    default_project_code = project_code_from_path(path)
     last_error: Exception | None = None
     for encoding in ("utf-8-sig", "utf-8", "gb18030"):
         try:
@@ -136,6 +143,10 @@ def read_csv_rows(path: Path) -> list[dict[str, Any]]:
                     if not any(str(value or "").strip() for value in raw_row.values()):
                         continue
                     row: dict[str, Any] = {}
+                    if default_report_date:
+                        row["报表日期"] = default_report_date
+                    if default_project_code:
+                        row["项目代号"] = default_project_code
                     for raw_field, raw_value in raw_row.items():
                         field = COLUMN_RENAME.get(raw_field, raw_field)
                         row[field] = parse_value(raw_field, raw_value)
@@ -189,7 +200,16 @@ def collect_csv_paths(input_dir: Path, pattern: str, include_history: bool = Fal
     paths = sorted(path for path in input_dir.rglob(pattern) if path.is_file())
     if include_history or not paths:
         return paths
-    return [paths[-1]]
+    return [
+        max(
+            paths,
+            key=lambda path: (
+                report_date_from_path(path) or "",
+                path.stat().st_mtime,
+                path.name,
+            ),
+        )
+    ]
 
 
 def build_payload(csv_paths: list[Path]) -> dict[str, Any]:
