@@ -768,27 +768,30 @@ function eventParameterFields() {
       ];
 }
 
-function buildEventParameterItems(rows) {
+function activeEventParameterFields(rows) {
+  return eventParameterFields().filter((field) =>
+    rows.some((row) => {
+      const value = row[field.key];
+      return value !== null && value !== undefined && String(value).trim() !== "";
+    })
+  );
+}
+
+function buildEventParameterItems(rows, parameterFields) {
   const groups = new Map();
   rows.forEach((row) => {
-    eventParameterFields().forEach((field) => {
-      const value = row[field.key];
-      if (value === null || value === undefined || String(value).trim() === "") {
-        return;
-      }
-      const key = `${field.key}||${String(value)}`;
-      if (!groups.has(key)) {
-        groups.set(key, {
-          parameterName: field.label || field.key,
-          parameterValue: String(value),
-          eventCount: 0,
-          totalUsers: 0,
-        });
-      }
-      const item = groups.get(key);
-      item.eventCount += Number(row.event_count || 0);
-      item.totalUsers += Number(row.total_users || 0);
-    });
+    const values = parameterFields.map((field) => String(row[field.key] ?? "").trim());
+    const key = parameterFields.length ? JSON.stringify(values) : "__all__";
+    if (!groups.has(key)) {
+      groups.set(key, {
+        values,
+        eventCount: 0,
+        totalUsers: 0,
+      });
+    }
+    const item = groups.get(key);
+    item.eventCount += Number(row.event_count || 0);
+    item.totalUsers += Number(row.total_users || 0);
   });
   return [...groups.values()].sort((a, b) => {
     const eventDiff = b.eventCount - a.eventCount;
@@ -799,26 +802,28 @@ function buildEventParameterItems(rows) {
     if (userDiff !== 0) {
       return userDiff;
     }
-    const nameDiff = a.parameterName.localeCompare(b.parameterName, "zh-Hans-CN", { numeric: true });
-    if (nameDiff !== 0) {
-      return nameDiff;
+    for (let index = 0; index < a.values.length; index += 1) {
+      const diff = a.values[index].localeCompare(b.values[index], "zh-Hans-CN", { numeric: true });
+      if (diff !== 0) {
+        return diff;
+      }
     }
-    return a.parameterValue.localeCompare(b.parameterValue, "zh-Hans-CN", { numeric: true });
+    return 0;
   });
 }
 
 function renderEventParameterDetail(rows) {
   const host = document.querySelector("#detail-table");
   const countNode = document.querySelector("#detail-count");
-  const items = buildEventParameterItems(rows);
+  const parameterFields = activeEventParameterFields(rows);
+  const items = buildEventParameterItems(rows, parameterFields);
   const visibleItems = items.slice(0, 1000);
   const extraCount = items.length - visibleItems.length;
   const context = ["事件名", "国家", "版本号"].map(selectedTitlePart).join(" / ");
   const body = visibleItems
     .map((item) => `
       <tr>
-        <td class="api-cell">${escapeHtml(item.parameterName)}</td>
-        <td class="param-value-cell">${escapeHtml(item.parameterValue)}</td>
+        ${item.values.map((value) => `<td class="param-value-cell">${escapeHtml(value || "NA")}</td>`).join("")}
         <td class="number-cell">${formatCount(item.eventCount)}</td>
         <td class="number-cell">${formatCount(item.totalUsers)}</td>
       </tr>
@@ -836,14 +841,13 @@ function renderEventParameterDetail(rows) {
           <table>
             <thead>
               <tr>
-                <th>参数名</th>
-                <th>参数值</th>
+                ${parameterFields.map((field) => `<th>${escapeHtml(field.label || field.key)}</th>`).join("")}
                 <th>事件数</th>
                 <th>用户数</th>
               </tr>
             </thead>
             <tbody>
-              ${body || `<tr><td colspan="4" class="empty-table">当前筛选下暂无数据</td></tr>`}
+              ${body || `<tr><td colspan="${parameterFields.length + 2}" class="empty-table">当前筛选下暂无数据</td></tr>`}
             </tbody>
           </table>
         </div>
