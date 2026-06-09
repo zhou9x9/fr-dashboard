@@ -41,10 +41,7 @@
       }
 
       .topbar {
-        display: grid;
-        grid-template-columns: 1fr auto;
-        gap: 16px;
-        align-items: end;
+        display: block;
         margin-bottom: 16px;
       }
 
@@ -82,6 +79,7 @@
       .tabs {
         display: inline-flex;
         gap: 6px;
+        margin-top: 12px;
         padding: 4px;
         border: 1px solid var(--line);
         border-radius: 8px;
@@ -441,8 +439,7 @@
 
       @media (max-width: 980px) {
         .topbar {
-          grid-template-columns: 1fr;
-          align-items: start;
+          margin-bottom: 14px;
         }
 
         .control-grid {
@@ -480,27 +477,27 @@
       <header class="topbar">
         <div>
           <h1>RM 数据看板</h1>
+          <nav class="tabs" aria-label="RM 看板菜单">
+            <button class="tab active" type="button" data-menu="api" aria-current="page">API数据</button>
+            <button class="tab" type="button" data-menu="event_parameter" aria-current="false">事件参数</button>
+          </nav>
           <div class="meta-row">
             <span>生成时间：<b id="generated-at">加载中</b></span>
             <span id="source-count">0 个附件</span>
             <span id="row-count">0 行</span>
           </div>
         </div>
-        <nav class="tabs" aria-label="RM 看板菜单">
-          <button class="tab active" type="button" data-menu="api" aria-current="page">API数据</button>
-          <button class="tab" type="button" data-menu="event_parameter" aria-current="false">事件参数</button>
-        </nav>
       </header>
 
       <main class="stack">
-        <section id="chart-panel" class="panel">
+        <section class="panel">
           <div class="panel-head">
             <h2>控制台</h2>
           </div>
           <div id="filters" class="control-grid"></div>
         </section>
 
-        <section class="panel">
+        <section id="chart-panel" class="panel">
           <div class="panel-head">
             <h2>趋势折线图</h2>
             <div id="chart-count" class="panel-note">0 条记录</div>
@@ -523,7 +520,7 @@
       </main>
     </div>
 
-    <script src="./data.js"></script>
-    <script src="./app.js"></script>
+    <script src="./data.js?v=202606091010"></script>
+    <script src="./app.js?v=202606091010"></script>
   </body>
 </html>
