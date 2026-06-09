@@ -780,10 +780,12 @@ function activeEventParameterFields(rows) {
 function buildEventParameterItems(rows, parameterFields) {
   const groups = new Map();
   rows.forEach((row) => {
+    const eventName = String(row["事件名"] ?? "NA").trim() || "NA";
     const values = parameterFields.map((field) => String(row[field.key] ?? "").trim());
-    const key = parameterFields.length ? JSON.stringify(values) : "__all__";
+    const key = JSON.stringify([eventName, ...values]);
     if (!groups.has(key)) {
       groups.set(key, {
+        eventName,
         values,
         eventCount: 0,
         totalUsers: 0,
@@ -801,6 +803,10 @@ function buildEventParameterItems(rows, parameterFields) {
     const userDiff = b.totalUsers - a.totalUsers;
     if (userDiff !== 0) {
       return userDiff;
+    }
+    const eventNameDiff = a.eventName.localeCompare(b.eventName, "zh-Hans-CN", { numeric: true });
+    if (eventNameDiff !== 0) {
+      return eventNameDiff;
     }
     for (let index = 0; index < a.values.length; index += 1) {
       const diff = a.values[index].localeCompare(b.values[index], "zh-Hans-CN", { numeric: true });
@@ -823,6 +829,7 @@ function renderEventParameterDetail(rows) {
   const body = visibleItems
     .map((item) => `
       <tr>
+        <td class="api-cell">${escapeHtml(item.eventName)}</td>
         ${item.values.map((value) => `<td class="param-value-cell">${escapeHtml(value || "NA")}</td>`).join("")}
         <td class="number-cell">${formatCount(item.eventCount)}</td>
         <td class="number-cell">${formatCount(item.totalUsers)}</td>
@@ -841,13 +848,14 @@ function renderEventParameterDetail(rows) {
           <table>
             <thead>
               <tr>
+                <th>事件名</th>
                 ${parameterFields.map((field) => `<th>${escapeHtml(field.label || field.key)}</th>`).join("")}
                 <th>事件数</th>
                 <th>用户数</th>
               </tr>
             </thead>
             <tbody>
-              ${body || `<tr><td colspan="${parameterFields.length + 2}" class="empty-table">当前筛选下暂无数据</td></tr>`}
+              ${body || `<tr><td colspan="${parameterFields.length + 3}" class="empty-table">当前筛选下暂无数据</td></tr>`}
             </tbody>
           </table>
         </div>
