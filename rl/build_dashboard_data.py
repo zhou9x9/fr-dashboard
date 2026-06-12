@@ -17,6 +17,7 @@ FEATURE_OUTPUT_PATH = BASE_DIR / "feature_data.js"
 MAIN_DIMENSIONS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号"]
 TIMING_DIMENSIONS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号", "分析类型", "通知时机"]
 FEATURE_DIMENSIONS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号", "分析类型", "分析对象", "展示格式"]
+NOTIFICATION_COPY_DEFAULT_PROJECTS = {"FR001B", "FR002B", "FR005", "FR005B", "FR006", "FR006B"}
 
 RECOMMENDED_FUNNEL_METRICS = [
     "新增用户数",
@@ -107,7 +108,9 @@ def normalize_timing_table(header: list[str], rows: list[dict]) -> tuple[list[st
 
     for row in rows:
         analysis_object = row.get("分析对象") or row.get("通知时机")
-        analysis_type = row.get("分析类型") or "通知时机"
+        analysis_type = row.get("分析类型")
+        if not analysis_type:
+            analysis_type = "通知文案" if row.get("项目代号") in NOTIFICATION_COPY_DEFAULT_PROJECTS else "通知时机"
         row["分析类型"] = analysis_type
         row["通知时机"] = analysis_object
         row.pop("分析对象", None)
