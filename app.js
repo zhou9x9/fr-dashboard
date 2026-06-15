@@ -692,6 +692,9 @@ function featureOptionsFor(field) {
   if (field === "国家") {
     return featureCountryOptions();
   }
+  if (field === "分析类型") {
+    return values;
+  }
   if (field === "国家" || field === "版本号") {
     const allValues = values.includes("全部") ? ["全部"] : [];
     const others = values
