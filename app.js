@@ -3927,8 +3927,8 @@ function renderTiming() {
     </article>
   `).join("");
 
+  const detailMetrics = overviewMetrics.filter((metric) => !metric.startsWith("D2"));
   const timingCards = detailGroups.map((group) => {
-    const detailMetrics = dashboardData.timing.metrics.filter((metric) => !metric.startsWith("D2"));
     const subjectKeys = subjects.map((subject) => subject.subject);
     const subjectDataByKey = new Map(group.subjects.map((item) => [item.subject, item]));
     const comparisonColumns = comparisonColumnsForSubjects(subjectKeys.length);
