@@ -554,6 +554,26 @@ function sortCompareMetrics(metrics) {
   });
 }
 
+function timingMetricRank(metric) {
+  if (metric === "新增用户数") return 0;
+  if (metric.includes("展示用户率")) return 1;
+  if (metric.includes("人均展示次数")) return 2;
+  if (metric.includes("通知点击率")) return 3;
+  if (metric.includes("人均点击次数")) return 4;
+  if (metric.includes("点击转化率")) return 5;
+  return 100;
+}
+
+function sortTimingMetrics(metrics) {
+  return metrics.slice().sort((a, b) => {
+    const dayDiff = metricDayRank(a) - metricDayRank(b);
+    if (dayDiff !== 0) return dayDiff;
+    const rankDiff = timingMetricRank(a) - timingMetricRank(b);
+    if (rankDiff !== 0) return rankDiff;
+    return String(a).localeCompare(String(b), "zh-Hans-CN", { numeric: true });
+  });
+}
+
 function shouldExcludeLatestFirstVisit(metric) {
   return metric === "D1留存率" || metric === "卸载率_D0";
 }
@@ -3908,9 +3928,10 @@ function renderTiming() {
   }
   const selectedTimingMetrics = (appState.timingMetrics || [])
     .filter((metric) => dashboardData.timing.metrics.includes(metric));
+  const sortedSelectedTimingMetrics = sortTimingMetrics(selectedTimingMetrics);
   const overviewMetrics = selectedTimingMetrics.length
-    ? selectedTimingMetrics
-    : DEFAULT_TIMING_METRICS.filter((metric) => dashboardData.timing.metrics.includes(metric));
+    ? sortedSelectedTimingMetrics
+    : sortTimingMetrics(DEFAULT_TIMING_METRICS.filter((metric) => dashboardData.timing.metrics.includes(metric)));
   const overviewCharts = overviewMetrics.map((metric) => `
     <article class="compare-card">
       <div class="compare-head">
@@ -4977,7 +4998,7 @@ function buildControlSection() {
 
   renderMultiSelect(
     document.querySelector("#timing-metrics"),
-    dashboardData.timing.metrics,
+    sortTimingMetrics(dashboardData.timing.metrics),
     appState.timingMetrics,
     (values) => {
       appState.timingMetrics = values.length
