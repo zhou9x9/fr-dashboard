@@ -49,6 +49,7 @@ const DEFAULT_TIMING_METRICS = [
   "D0通知点击率",
   "D0人均展示次数",
   "D0人均点击次数",
+  "D0通知点击转化率",
 ];
 const SERIES_COLORS = ["#2563eb", "#0f766e", "#64748b", "#f59e0b"];
 const TIMING_SHORT_LABELS = {
