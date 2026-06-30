@@ -18,6 +18,7 @@ MAIN_DIMENSIONS = ["报表日期", "项目代号", "首次访问日期", "国家
 TIMING_DIMENSIONS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号", "分析类型", "通知时机"]
 FEATURE_DIMENSIONS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号", "分析类型", "分析对象", "展示格式"]
 NOTIFICATION_COPY_DEFAULT_PROJECTS = {"FR001B", "FR002B", "FR005", "FR005B", "FR006", "FR006B"}
+METRIC_RENAME_MAP = {"first_open\u6570": "\u65b0\u589e\u7528\u6237\u6570"}
 
 RECOMMENDED_FUNNEL_METRICS = [
     "新增用户数",
@@ -119,11 +120,11 @@ def normalize_timing_table(header: list[str], rows: list[dict]) -> tuple[list[st
 
 
 def build_payload(common_csv_path: Path, timing_csv_path: Path, feature_csv_path: Path | None = None):
-    main_header, main_rows = read_csv_rows(common_csv_path)
-    timing_header, timing_rows = read_csv_rows(timing_csv_path, rename_map={"版本": "版本号"})
+    main_header, main_rows = read_csv_rows(common_csv_path, rename_map=METRIC_RENAME_MAP)
+    timing_header, timing_rows = read_csv_rows(timing_csv_path, rename_map={**METRIC_RENAME_MAP, "\u7248\u672c": "\u7248\u672c\u53f7"})
     timing_header, timing_rows = normalize_timing_table(timing_header, timing_rows)
     if feature_csv_path:
-        feature_header, feature_rows = read_csv_rows(feature_csv_path, rename_map={"版本": "版本号"})
+        feature_header, feature_rows = read_csv_rows(feature_csv_path, rename_map={**METRIC_RENAME_MAP, "\u7248\u672c": "\u7248\u672c\u53f7"})
     else:
         feature_header, feature_rows = [], []
 
