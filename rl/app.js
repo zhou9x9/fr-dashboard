@@ -226,6 +226,10 @@ function uniqueValues(rows, field) {
   return [...new Set(rows.map((row) => row[field]))].filter((value) => value !== null && value !== undefined);
 }
 
+function uniqueArray(values) {
+  return [...new Set(values)].filter((value) => value !== null && value !== undefined);
+}
+
 function sortDimensionValues(field, values) {
   const copy = values.slice();
   if (field.includes("日期")) {
@@ -1457,6 +1461,13 @@ function applyDimensionFilters(rows, filters) {
 }
 
 function computeCompareAnalysis() {
+  if (appState.activeWorkspace === "cross_project") {
+    appState.compareField = "项目代号";
+    const selectedProjects = (appState.filters["项目代号"] || []).filter((value) => value !== "全部");
+    if (selectedProjects.length) {
+      appState.compareValues = selectedProjects.slice();
+    }
+  }
   const compareField = availableCompareFields().includes(appState.compareField) ? appState.compareField : availableCompareFields()[0];
   appState.compareField = compareField;
   const compareBaseRows = baseRowsForAnalysis();
