@@ -1550,11 +1550,14 @@ function computeCompareAnalysis() {
     });
   }
 
-  if (groupDimensions.length === 1 && groupDimensions[0] === "首次访问日期") {
+  if (groupDimensions.includes("首次访问日期")) {
     groups.sort((a, b) => {
-      const aDate = JSON.parse(a.key)[0] || "";
-      const bDate = JSON.parse(b.key)[0] || "";
-      return String(bDate).localeCompare(String(aDate), "zh-Hans-CN", { numeric: true });
+      const firstVisitIndex = groupDimensions.indexOf("首次访问日期");
+      const aDate = JSON.parse(a.key)[firstVisitIndex] || "";
+      const bDate = JSON.parse(b.key)[firstVisitIndex] || "";
+      const dateDiff = String(bDate).localeCompare(String(aDate), "zh-Hans-CN", { numeric: true });
+      if (dateDiff !== 0) return dateDiff;
+      return (b.strongestDiff?.diff || 0) - (a.strongestDiff?.diff || 0);
     });
   } else {
     groups.sort((a, b) => (b.strongestDiff?.diff || 0) - (a.strongestDiff?.diff || 0));
@@ -3101,9 +3104,9 @@ function renderCompareDetails(analysis) {
   const selectedLatestFirstVisitDate = appState.filters["首次访问日期"]?.length
     ? appState.filters["首次访问日期"].slice().sort((a, b) => String(a).localeCompare(String(b), "zh-Hans-CN", { numeric: true })).slice(-1)[0]
     : null;
-  const metricsForSummary = appState.activeWorkspace === "country_opt"
+  const metricsForSummary = uniqueArray(appState.activeWorkspace === "country_opt"
     ? sortCompareMetrics(["新增用户数", ...analysis.compareMetrics.filter((metric) => metric !== "新增用户数")])
-    : sortCompareMetrics(analysis.compareMetrics);
+    : sortCompareMetrics(analysis.compareMetrics));
   const metricsForCountryNarrative = metricsForSummary.filter((metric) => metric !== "新增用户数");
   let summaryBlock = "";
   let trendBlock = "";
@@ -3298,7 +3301,8 @@ function renderCompareDetails(analysis) {
       : "";
     summaryBlock = trendBlock;
   }
-  const detailGroups = appState.activeWorkspace === "cross_project"
+  const shouldSortDetailGroupsByLatestDate = ["cross_project", "version_iteration"].includes(appState.activeWorkspace);
+  const detailGroups = shouldSortDetailGroupsByLatestDate
     ? analysis.groups.slice().sort((a, b) => {
         const aDateLabel = a.labels.find((label) => label.startsWith("首次访问日期:")) || "";
         const bDateLabel = b.labels.find((label) => label.startsWith("首次访问日期:")) || "";
