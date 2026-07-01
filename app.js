@@ -1550,11 +1550,14 @@ function computeCompareAnalysis() {
     });
   }
 
-  if (groupDimensions.length === 1 && groupDimensions[0] === "首次访问日期") {
+  if (groupDimensions.includes("首次访问日期")) {
     groups.sort((a, b) => {
-      const aDate = JSON.parse(a.key)[0] || "";
-      const bDate = JSON.parse(b.key)[0] || "";
-      return String(bDate).localeCompare(String(aDate), "zh-Hans-CN", { numeric: true });
+      const firstVisitIndex = groupDimensions.indexOf("首次访问日期");
+      const aDate = JSON.parse(a.key)[firstVisitIndex] || "";
+      const bDate = JSON.parse(b.key)[firstVisitIndex] || "";
+      const dateDiff = String(bDate).localeCompare(String(aDate), "zh-Hans-CN", { numeric: true });
+      if (dateDiff !== 0) return dateDiff;
+      return (b.strongestDiff?.diff || 0) - (a.strongestDiff?.diff || 0);
     });
   } else {
     groups.sort((a, b) => (b.strongestDiff?.diff || 0) - (a.strongestDiff?.diff || 0));
