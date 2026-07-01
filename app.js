@@ -3101,9 +3101,9 @@ function renderCompareDetails(analysis) {
   const selectedLatestFirstVisitDate = appState.filters["首次访问日期"]?.length
     ? appState.filters["首次访问日期"].slice().sort((a, b) => String(a).localeCompare(String(b), "zh-Hans-CN", { numeric: true })).slice(-1)[0]
     : null;
-  const metricsForSummary = appState.activeWorkspace === "country_opt"
+  const metricsForSummary = uniqueArray(appState.activeWorkspace === "country_opt"
     ? sortCompareMetrics(["新增用户数", ...analysis.compareMetrics.filter((metric) => metric !== "新增用户数")])
-    : sortCompareMetrics(analysis.compareMetrics);
+    : sortCompareMetrics(analysis.compareMetrics));
   const metricsForCountryNarrative = metricsForSummary.filter((metric) => metric !== "新增用户数");
   let summaryBlock = "";
   let trendBlock = "";
@@ -3298,7 +3298,8 @@ function renderCompareDetails(analysis) {
       : "";
     summaryBlock = trendBlock;
   }
-  const detailGroups = appState.activeWorkspace === "cross_project"
+  const shouldSortDetailGroupsByLatestDate = ["cross_project", "version_iteration"].includes(appState.activeWorkspace);
+  const detailGroups = shouldSortDetailGroupsByLatestDate
     ? analysis.groups.slice().sort((a, b) => {
         const aDateLabel = a.labels.find((label) => label.startsWith("首次访问日期:")) || "";
         const bDateLabel = b.labels.find((label) => label.startsWith("首次访问日期:")) || "";
