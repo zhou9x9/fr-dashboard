@@ -11,8 +11,8 @@ from typing import Any
 
 DEFAULT_INPUT_DIR = Path("rm06b_api_attachments")
 DEFAULT_OUTPUT = Path("rm_api_dashboard") / "data.js"
-DEFAULT_GLOB = "RM06B_api_d0_*.csv"
-DEFAULT_EVENT_PARAMETER_GLOB = "RM06B_event_parameter_*.csv"
+DEFAULT_GLOB = "RM*_api_d0_*.csv"
+DEFAULT_EVENT_PARAMETER_GLOB = "RM*_event_parameter_*.csv"
 
 DIMENSIONS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号", "API"]
 SPLIT_DIMENSIONS = ["首次访问日期", "国家", "版本号", "报表日期", "项目代号"]
