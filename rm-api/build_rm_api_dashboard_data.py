@@ -150,6 +150,10 @@ def read_csv_rows(path: Path) -> list[dict[str, Any]]:
                     for raw_field, raw_value in raw_row.items():
                         field = COLUMN_RENAME.get(raw_field, raw_field)
                         row[field] = parse_value(raw_field, raw_value)
+                    if default_report_date:
+                        row["报表日期"] = default_report_date
+                    if default_project_code:
+                        row["项目代号"] = default_project_code
                     rows.append(row)
             return rows
         except Exception as exc:  # noqa: BLE001
@@ -161,6 +165,7 @@ def read_csv_rows(path: Path) -> list[dict[str, Any]]:
 def read_event_parameter_rows(path: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     report_date = report_date_from_path(path)
+    project_code = project_code_from_path(path)
     last_error: Exception | None = None
     for encoding in ("utf-8-sig", "utf-8", "gb18030"):
         try:
@@ -174,6 +179,10 @@ def read_event_parameter_rows(path: Path) -> list[dict[str, Any]]:
                     for raw_field in original_header:
                         field = EVENT_PARAMETER_COLUMN_RENAME.get(raw_field, raw_field)
                         row[field] = parse_event_parameter_value(raw_field, raw_row.get(raw_field, ""))
+                    if report_date:
+                        row["报表日期"] = report_date
+                    if project_code:
+                        row["项目代号"] = project_code
                     if all(row.get(field) for field in EVENT_PARAMETER_DIMENSIONS):
                         rows.append(row)
             return rows
