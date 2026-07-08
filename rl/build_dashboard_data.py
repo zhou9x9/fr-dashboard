@@ -18,7 +18,10 @@ MAIN_DIMENSIONS = ["报表日期", "项目代号", "首次访问日期", "国家
 TIMING_DIMENSIONS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号", "分析类型", "通知时机"]
 FEATURE_DIMENSIONS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号", "分析类型", "分析对象", "展示格式"]
 NOTIFICATION_COPY_DEFAULT_PROJECTS = {"FR001B", "FR002B", "FR005", "FR005B", "FR006", "FR006B"}
-METRIC_RENAME_MAP = {"first_open\u6570": "\u65b0\u589e\u7528\u6237\u6570"}
+METRIC_RENAME_MAP = {
+    "first_open\u6570": "\u65b0\u589e\u7528\u6237\u6570",
+    "first_open\u65b9": "\u65b0\u589e\u7528\u6237\u6570",
+}
 
 RECOMMENDED_FUNNEL_METRICS = [
     "新增用户数",
@@ -88,12 +91,18 @@ def read_csv_rows(path: Path, rename_map: dict[str, str] | None = None) -> tuple
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
         original_header = list(reader.fieldnames or [])
-        header = [rename_map.get(name, name) for name in original_header]
+        mapped_header = [rename_map.get(name, name) for name in original_header]
+        header = []
+        for name in mapped_header:
+            if name not in header:
+                header.append(name)
         rows = []
         for raw_row in reader:
             row = {}
-            for original_name, normalized_name in zip(original_header, header):
-                row[normalized_name] = parse_value(normalized_name, raw_row.get(original_name, ""))
+            for original_name, normalized_name in zip(original_header, mapped_header):
+                value = parse_value(normalized_name, raw_row.get(original_name, ""))
+                if normalized_name not in row or (row[normalized_name] is None and value is not None):
+                    row[normalized_name] = value
             rows.append(row)
     return header, rows
 
