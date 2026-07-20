@@ -14,10 +14,10 @@ DEFAULT_OUTPUT = Path("rm_api_dashboard") / "data.js"
 DEFAULT_GLOB = "RM*_api_d0_*.csv"
 DEFAULT_EVENT_PARAMETER_GLOB = "RM*_event_parameter_*.csv"
 
-DIMENSIONS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号", "API"]
-SPLIT_DIMENSIONS = ["首次访问日期", "国家", "版本号", "报表日期", "项目代号"]
+DIMENSIONS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号", "API", "type"]
+SPLIT_DIMENSIONS = ["首次访问日期", "国家", "版本号", "type", "报表日期", "项目代号"]
 METRICS = ["event_success_rate", "user_success_rate", "event_fail_rate", "user_fail_rate"]
-EVENT_PARAMETER_DIMENSIONS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号", "事件名"]
+EVENT_PARAMETER_DIMENSIONS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号", "事件名", "type"]
 EVENT_PARAMETER_FIELDS = [
     {"key": "api", "label": "API"},
     {"key": "reason", "label": "reason"},
@@ -183,7 +183,7 @@ def read_event_parameter_rows(path: Path) -> list[dict[str, Any]]:
                         row["报表日期"] = report_date
                     if project_code:
                         row["项目代号"] = project_code
-                    if all(row.get(field) for field in EVENT_PARAMETER_DIMENSIONS):
+                    if all(row.get(field) for field in EVENT_PARAMETER_DIMENSIONS if field != "type"):
                         rows.append(row)
             return rows
         except Exception as exc:  # noqa: BLE001
@@ -228,7 +228,7 @@ def build_payload(csv_paths: list[Path]) -> dict[str, Any]:
     for path in csv_paths:
         source_files.append(str(path))
         for row in read_csv_rows(path):
-            if not all(row.get(field) for field in DIMENSIONS):
+            if not all(row.get(field) for field in DIMENSIONS if field != "type"):
                 continue
             deduped[row_key(row)] = row
 
@@ -241,6 +241,7 @@ def build_payload(csv_paths: list[Path]) -> dict[str, Any]:
             str(row.get("国家") or ""),
             str(row.get("版本号") or ""),
             str(row.get("API") or ""),
+            str(row.get("type") or ""),
         ),
     )
 
@@ -273,6 +274,7 @@ def build_event_parameter_payload(csv_paths: list[Path]) -> dict[str, Any]:
             str(row.get("国家") or ""),
             str(row.get("版本号") or ""),
             str(row.get("事件名") or ""),
+            str(row.get("type") or ""),
             str(row.get("api") or ""),
             str(row.get("reason") or ""),
             str(row.get("message") or ""),

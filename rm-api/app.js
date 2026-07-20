@@ -1,14 +1,14 @@
 const dashboardData = window.RM_API_DASHBOARD_DATA || {
   generatedAt: "",
   sourceFiles: [],
-  dimensions: ["报表日期", "项目代号", "首次访问日期", "国家", "版本号", "API"],
-  splitDimensions: ["首次访问日期", "国家", "版本号", "报表日期", "项目代号"],
+  dimensions: ["报表日期", "项目代号", "首次访问日期", "国家", "版本号", "API", "type"],
+  splitDimensions: ["首次访问日期", "国家", "版本号", "type", "报表日期", "项目代号"],
   metrics: ["event_success_rate", "user_success_rate", "event_fail_rate", "user_fail_rate"],
   metricMeta: {},
   rows: [],
   eventParameter: {
     sourceFiles: [],
-    dimensions: ["报表日期", "项目代号", "首次访问日期", "版本号", "国家", "事件名"],
+    dimensions: ["报表日期", "项目代号", "首次访问日期", "版本号", "国家", "事件名", "type"],
     parameterFields: [
       { key: "api", label: "API" },
       { key: "reason", label: "reason" },
@@ -24,7 +24,7 @@ const dashboardData = window.RM_API_DASHBOARD_DATA || {
 
 const eventParameterData = dashboardData.eventParameter || {
   sourceFiles: [],
-  dimensions: ["报表日期", "项目代号", "首次访问日期", "版本号", "国家", "事件名"],
+  dimensions: ["报表日期", "项目代号", "首次访问日期", "版本号", "国家", "事件名", "type"],
   parameterFields: [
     { key: "api", label: "API" },
     { key: "reason", label: "reason" },
@@ -39,15 +39,15 @@ const eventParameterData = dashboardData.eventParameter || {
 
 const MENU_API = "api";
 const MENU_EVENT_PARAMETER = "event_parameter";
-const DIMENSION_FIELDS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号", "API"];
-const EVENT_PARAMETER_DIMENSION_FIELDS = ["报表日期", "项目代号", "首次访问日期", "版本号", "国家", "事件名"];
+const DIMENSION_FIELDS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号", "API", "type"];
+const EVENT_PARAMETER_DIMENSION_FIELDS = ["报表日期", "项目代号", "首次访问日期", "版本号", "国家", "事件名", "type"];
 const EVENT_PARAMETER_FILTER_FIELDS = [...EVENT_PARAMETER_DIMENSION_FIELDS, "api"];
 const ALL_FILTER_FIELDS = [...new Set([...DIMENSION_FIELDS, ...EVENT_PARAMETER_FILTER_FIELDS])];
 const RATE_METRICS = ["event_success_rate", "user_success_rate", "event_fail_rate", "user_fail_rate"].filter((metric) =>
   dashboardData.metrics.includes(metric)
 );
-const CHART_SPLIT_FIELDS = ["API", "国家", "版本号"];
-const DETAIL_SPLIT_FIELDS = ["首次访问日期", "国家", "版本号", "报表日期", "项目代号"];
+const CHART_SPLIT_FIELDS = ["API", "国家", "版本号", "type"];
+const DETAIL_SPLIT_FIELDS = ["首次访问日期", "国家", "版本号", "type", "报表日期", "项目代号"];
 const API_CONTROL_CONFIGS = [
   { key: "报表日期", label: "报表日期", type: "filter" },
   { key: "项目代号", label: "项目代号", type: "filter" },
@@ -55,6 +55,7 @@ const API_CONTROL_CONFIGS = [
   { key: "版本号", label: "版本号", type: "filter" },
   { key: "国家", label: "国家", type: "filter" },
   { key: "API", label: "API", type: "filter", tall: true },
+  { key: "type", label: "type", type: "filter" },
   { key: "splitDimensions", label: "拆分维度", type: "split" },
   { key: "metrics", label: "关注指标", type: "metrics" },
 ];
@@ -65,6 +66,7 @@ const EVENT_PARAMETER_CONTROL_CONFIGS = [
   { key: "版本号", label: "版本号", type: "filter" },
   { key: "国家", label: "国家", type: "filter" },
   { key: "事件名", label: "事件名", type: "filter", tall: true },
+  { key: "type", label: "type", type: "filter" },
   { key: "api", label: "API", type: "filter", tall: true },
 ];
 const FIELD_SHORT_LABELS = {
@@ -74,6 +76,7 @@ const FIELD_SHORT_LABELS = {
   国家: "国家",
   版本号: "版本",
   API: "API",
+  type: "type",
 };
 const COLOR_PALETTE = [
   "#2563eb",
@@ -260,7 +263,7 @@ function optionLabel(config, value) {
 
 function controlSummary(config, selected, options) {
   if (!selected.length) {
-    return "未选择";
+    return config.type === "filter" ? "全部" : "未选择";
   }
   if (options.length > 1 && selected.length === options.length) {
     return "全部";
@@ -289,6 +292,7 @@ function initDefaults() {
   state.filters["国家"] = countries.includes("ALL") ? ["ALL"] : countries.slice(0, 1);
   state.filters["版本号"] = versions.includes("ALL") ? ["ALL"] : versions.slice(-1);
   state.filters["API"] = apis.slice(0, 1);
+  state.filters["type"] = [];
   state.filters["事件名"] = eventNames.slice(0, 1);
   state.filters["api"] = eventApis.slice();
   state.splitDimensions = ["首次访问日期"].filter((field) => splitDimensionOptions().includes(field));
@@ -695,7 +699,7 @@ function selectedTitlePart(field) {
 }
 
 function detailGroupTitle(groupLabel, groupFields) {
-  const context = ["国家", "版本号"]
+  const context = ["国家", "版本号", "type"]
     .filter((field) => !groupFields.includes(field))
     .map(selectedTitlePart);
   if (groupLabel === "汇总") {
@@ -844,7 +848,7 @@ function renderEventParameterDetail(rows) {
   const items = buildEventParameterItems(rows, parameterFields);
   const visibleItems = items.slice(0, 1000);
   const extraCount = items.length - visibleItems.length;
-  const context = ["事件名", "国家", "版本号"].map(selectedTitlePart).join(" / ");
+  const context = ["事件名", "国家", "版本号", "type"].map(selectedTitlePart).join(" / ");
   const body = visibleItems
     .map((item) => `
       <tr>
