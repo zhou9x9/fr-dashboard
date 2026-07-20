@@ -324,6 +324,7 @@ function renderControls() {
     const options = optionsForControl(config);
     const selected = selectedForControl(config).filter((value) => options.includes(value));
     setSelectedForControl(config, selected);
+    const selectedCount = config.type === "filter" && !selected.length ? options.length : selected.length;
     const selectedValues = selectedSet(config);
     const optionsHtml = options
       .map((value) => {
@@ -342,7 +343,7 @@ function renderControls() {
       <div class="multi-control${openClass}${tallClass}" data-control="${escapeHtml(config.key)}">
         <div class="label-row">
           <label>${escapeHtml(config.label)}</label>
-          <span>${selected.length}/${options.length}</span>
+          <span>${selectedCount}/${options.length}</span>
         </div>
         <button class="select-trigger" type="button" data-trigger="${escapeHtml(config.key)}">
           <span>${escapeHtml(controlSummary(config, selected, options))}</span>
