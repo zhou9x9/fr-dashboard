@@ -114,8 +114,18 @@ function isAllValue(value) {
   return value === "ALL" || value === "全部";
 }
 
+const TYPE_EMPTY_LABEL = "未填写";
+
 function isStrictFilterField(field) {
   return field === "type";
+}
+
+function valueForField(row, field) {
+  if (field === "type") {
+    const value = row[field];
+    return value === null || value === undefined || String(value).trim() === "" ? TYPE_EMPTY_LABEL : value;
+  }
+  return row[field];
 }
 
 function activeData() {
@@ -135,7 +145,9 @@ function activeControlConfigs() {
 }
 
 function uniqueValues(rows, field) {
-  return [...new Set(rows.map((row) => row[field]))].filter((value) => value !== null && value !== undefined && value !== "");
+  return [...new Set(rows.map((row) => valueForField(row, field)))].filter(
+    (value) => value !== null && value !== undefined && value !== ""
+  );
 }
 
 function countryUserTotals(rows) {
@@ -231,6 +243,11 @@ function optionsForControl(config) {
   }
   if (config.type === "metrics") {
     return RATE_METRICS;
+  }
+  if (config.key === "type") {
+    return sortValues("type", [
+      ...new Set([...uniqueValues(dashboardData.rows || [], "type"), ...uniqueValues(eventParameterData.rows || [], "type")]),
+    ]);
   }
   return optionsFor(config.key, activeRows());
 }
@@ -397,7 +414,7 @@ function matchesFilter(row, field) {
   if (isStrictFilterField(field) && !selected.length) {
     return false;
   }
-  return !selected.length || selected.includes(row[field]);
+  return !selected.length || selected.includes(valueForField(row, field));
 }
 
 function matchesEventParameterFilter(row, field) {
@@ -488,7 +505,7 @@ function seriesLabel(metric, splitFields, row, rows) {
     const values = uniqueValues(rows, field);
     const selectedCount = (state.filters[field] || []).length;
     if (values.length > 1 || selectedCount > 1) {
-      parts.push(`${FIELD_SHORT_LABELS[field] || field}:${row[field]}`);
+      parts.push(`${FIELD_SHORT_LABELS[field] || field}:${valueForField(row, field)}`);
     }
   });
   return parts.length ? parts.join(" · ") : metricLabel(metric);
@@ -502,7 +519,7 @@ function buildSeries(rows) {
   state.metrics.forEach((metric) => {
     rows.forEach((row) => {
       const xValue = row["首次访问日期"];
-      const splitKey = splitFields.map((field) => row[field] ?? "NA").join("||");
+      const splitKey = splitFields.map((field) => valueForField(row, field) ?? "NA").join("||");
       const key = `${metric}||${splitKey}`;
       if (!seriesMap.has(key)) {
         seriesMap.set(key, {
@@ -664,19 +681,19 @@ function detailGroupLabel(fields, row) {
   if (!fields.length) {
     return "汇总";
   }
-  return fields.map((field) => `${field}: ${row[field] || "ALL"}`).join(" / ");
+  return fields.map((field) => `${field}: ${valueForField(row, field) || "ALL"}`).join(" / ");
 }
 
 function buildDetailGroups(rows) {
   const fields = detailSplitDimensions();
   const groupMap = new Map();
   rows.forEach((row) => {
-    const key = fields.length ? JSON.stringify(fields.map((field) => row[field] || "ALL")) : "__all__";
+    const key = fields.length ? JSON.stringify(fields.map((field) => valueForField(row, field) || "ALL")) : "__all__";
     if (!groupMap.has(key)) {
       groupMap.set(key, {
         label: detailGroupLabel(fields, row),
         rows: [],
-        values: fields.map((field) => row[field] || "ALL"),
+        values: fields.map((field) => valueForField(row, field) || "ALL"),
       });
     }
     groupMap.get(key).rows.push(row);
