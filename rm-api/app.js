@@ -114,6 +114,10 @@ function isAllValue(value) {
   return value === "ALL" || value === "全部";
 }
 
+function isStrictFilterField(field) {
+  return field === "type";
+}
+
 function activeData() {
   return state.activeMenu === MENU_EVENT_PARAMETER ? eventParameterData : dashboardData;
 }
@@ -263,7 +267,7 @@ function optionLabel(config, value) {
 
 function controlSummary(config, selected, options) {
   if (!selected.length) {
-    return config.type === "filter" ? "全部" : "未选择";
+    return config.type === "filter" && !isStrictFilterField(config.key) ? "全部" : "未选择";
   }
   if (options.length > 1 && selected.length === options.length) {
     return "全部";
@@ -285,6 +289,7 @@ function initDefaults() {
   const apis = optionsFor("API", apiRows);
   const eventNames = optionsFor("事件名", eventRows);
   const eventApis = optionsFor("api", eventRows);
+  const types = sortValues("type", [...new Set([...uniqueValues(apiRows, "type"), ...uniqueValues(eventRows, "type")])]);
 
   state.filters["报表日期"] = reportDates.slice(-1);
   state.filters["项目代号"] = projects.slice(0, 1);
@@ -292,10 +297,10 @@ function initDefaults() {
   state.filters["国家"] = countries.includes("ALL") ? ["ALL"] : countries.slice(0, 1);
   state.filters["版本号"] = versions.includes("ALL") ? ["ALL"] : versions.slice(-1);
   state.filters["API"] = apis.slice(0, 1);
-  state.filters["type"] = [];
+  state.filters["type"] = types.slice();
   state.filters["事件名"] = eventNames.slice(0, 1);
   state.filters["api"] = eventApis.slice();
-  state.splitDimensions = ["首次访问日期"].filter((field) => splitDimensionOptions().includes(field));
+  state.splitDimensions = ["首次访问日期", "type"].filter((field) => splitDimensionOptions().includes(field));
   state.metrics = RATE_METRICS.slice();
 }
 
@@ -324,7 +329,8 @@ function renderControls() {
     const options = optionsForControl(config);
     const selected = selectedForControl(config).filter((value) => options.includes(value));
     setSelectedForControl(config, selected);
-    const selectedCount = config.type === "filter" && !selected.length ? options.length : selected.length;
+    const selectedCount =
+      config.type === "filter" && !isStrictFilterField(config.key) && !selected.length ? options.length : selected.length;
     const selectedValues = selectedSet(config);
     const optionsHtml = options
       .map((value) => {
@@ -388,6 +394,9 @@ function restoreOpenSelectScroll(container = document) {
 
 function matchesFilter(row, field) {
   const selected = state.filters[field] || [];
+  if (isStrictFilterField(field) && !selected.length) {
+    return false;
+  }
   return !selected.length || selected.includes(row[field]);
 }
 
