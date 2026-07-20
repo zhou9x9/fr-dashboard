@@ -14,7 +14,7 @@ OUTPUT_PATH = BASE_DIR / "data.js"
 TIMING_OUTPUT_PATH = BASE_DIR / "timing_data.js"
 FEATURE_OUTPUT_PATH = BASE_DIR / "feature_data.js"
 
-MAIN_DIMENSIONS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号"]
+MAIN_DIMENSIONS = ["报表日期", "项目代号", "首次访问日期", "国家", "广告组", "版本号"]
 TIMING_DIMENSIONS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号", "分析类型", "通知时机"]
 FEATURE_DIMENSIONS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号", "分析类型", "分析对象", "展示格式"]
 NOTIFICATION_COPY_DEFAULT_PROJECTS = {"FR001B", "FR002B", "FR005", "FR005B", "FR006", "FR006B"}
@@ -66,7 +66,7 @@ def parse_value(field: str, raw: str):
     value = (raw or "").strip()
     if value == "":
         return None
-    if field in ("报表日期", "项目代号", "首次访问日期", "国家", "版本号", "通知时机", "分析类型", "分析对象", "展示格式"):
+    if field in ("报表日期", "项目代号", "首次访问日期", "国家", "广告组", "版本号", "通知时机", "分析类型", "分析对象", "展示格式"):
         return value
 
     normalized = value.replace(",", "")
@@ -130,6 +130,12 @@ def normalize_timing_table(header: list[str], rows: list[dict]) -> tuple[list[st
 
 def build_payload(common_csv_path: Path, timing_csv_path: Path, feature_csv_path: Path | None = None):
     main_header, main_rows = read_csv_rows(common_csv_path, rename_map=METRIC_RENAME_MAP)
+    if "广告组" not in main_header:
+        insert_at = main_header.index("版本号") if "版本号" in main_header else len(MAIN_DIMENSIONS) - 1
+        main_header.insert(insert_at, "广告组")
+    for row in main_rows:
+        if not row.get("广告组"):
+            row["广告组"] = "全部"
     timing_header, timing_rows = read_csv_rows(timing_csv_path, rename_map={**METRIC_RENAME_MAP, "\u7248\u672c": "\u7248\u672c\u53f7"})
     timing_header, timing_rows = normalize_timing_table(timing_header, timing_rows)
     if feature_csv_path:

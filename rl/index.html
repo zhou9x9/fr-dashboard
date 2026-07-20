@@ -451,6 +451,10 @@
         overflow-x: auto;
       }
 
+      .compact-table-wrap {
+        border-radius: 16px;
+      }
+
       table {
         width: 100%;
         border-collapse: collapse;
@@ -468,6 +472,83 @@
       th {
         color: var(--muted);
         font-weight: 700;
+      }
+
+      .compact-compare-table {
+        table-layout: fixed;
+        min-width: max(980px, 100%);
+      }
+
+      .compact-compare-table th,
+      .compact-compare-table td {
+        vertical-align: middle;
+      }
+
+      .compact-compare-table th:first-child,
+      .compact-compare-table td:first-child {
+        width: 128px;
+        min-width: 128px;
+        max-width: 128px;
+        word-break: keep-all;
+        overflow-wrap: anywhere;
+      }
+
+      .adgroup-compare-table th:not(:first-child),
+      .adgroup-compare-table td:not(:first-child) {
+        width: 136px;
+        min-width: 136px;
+        max-width: 136px;
+      }
+
+      .adgroup-compare-table th:nth-last-child(3),
+      .adgroup-compare-table th:nth-last-child(2),
+      .adgroup-compare-table td:nth-last-child(3),
+      .adgroup-compare-table td:nth-last-child(2) {
+        width: 150px;
+        min-width: 150px;
+        max-width: 150px;
+      }
+
+      .adgroup-compare-table th:last-child,
+      .adgroup-compare-table td:last-child {
+        width: 84px;
+        min-width: 84px;
+        max-width: 84px;
+      }
+
+      .thead-subject-label,
+      .summary-subject-label {
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        overflow: hidden;
+        line-height: 1.35;
+        word-break: break-word;
+      }
+
+      .summary-subject-label {
+        font-weight: 800;
+      }
+
+      .adgroup-card-title,
+      .adgroup-card-result {
+        font-family: inherit;
+        font-size: 18px;
+        line-height: 1.35;
+      }
+
+      .adgroup-card-result {
+        margin-top: 4px;
+        margin-bottom: 10px;
+      }
+
+      .adgroup-card-subject {
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        overflow: hidden;
+        word-break: break-word;
+        font-weight: 800;
       }
 
       .highlight-row {
@@ -911,14 +992,18 @@
               <div class="label-row"><label>首次访问日期</label></div>
               <div class="chips" data-filter="首次访问日期"></div>
             </div>
-            <div class="control-block">
-              <div class="label-row"><label>国家</label></div>
-              <div class="chips" data-filter="国家"></div>
-            </div>
-            <div class="control-block" data-control="version-filter">
-              <div class="label-row"><label>版本号</label></div>
-              <div class="chips" data-filter="版本号"></div>
-            </div>
+              <div class="control-block">
+                <div class="label-row"><label>国家</label></div>
+                <div class="chips" data-filter="国家"></div>
+              </div>
+              <div class="control-block" data-control="adgroup-filter">
+                <div class="label-row"><label>广告组</label></div>
+                <div class="chips" data-filter="广告组"></div>
+              </div>
+              <div class="control-block" data-control="version-filter">
+                <div class="label-row"><label>版本号</label></div>
+                <div class="chips" data-filter="版本号"></div>
+              </div>
 
             <div class="control-block" data-control="compare-values">
               <div class="label-row"><label>参与对比的主体值</label></div>
