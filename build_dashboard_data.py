@@ -128,6 +128,30 @@ def normalize_timing_table(header: list[str], rows: list[dict]) -> tuple[list[st
     return normalized_header, rows
 
 
+def fill_timing_conversion_rates(header: list[str], rows: list[dict]) -> tuple[list[str], list[dict]]:
+    for metric in list(header):
+        if not metric.endswith("通知点击转化率"):
+            continue
+        day = metric.replace("通知点击转化率", "")
+        display_metric = f"{day}展示用户率"
+        click_metric = f"{day}通知点击率"
+        if display_metric not in header or click_metric not in header:
+            continue
+
+        for row in rows:
+            if row.get(metric) not in (None, ""):
+                continue
+            display_value = row.get(display_metric)
+            click_value = row.get(click_metric)
+            if not isinstance(display_value, (int, float)) or not isinstance(click_value, (int, float)):
+                continue
+            if display_value <= 0:
+                continue
+            row[metric] = round(click_value / display_value, 6)
+
+    return header, rows
+
+
 def build_payload(common_csv_path: Path, timing_csv_path: Path, feature_csv_path: Path | None = None):
     main_header, main_rows = read_csv_rows(common_csv_path, rename_map=METRIC_RENAME_MAP)
     if "广告组" not in main_header:
@@ -138,6 +162,7 @@ def build_payload(common_csv_path: Path, timing_csv_path: Path, feature_csv_path
             row["广告组"] = "全部"
     timing_header, timing_rows = read_csv_rows(timing_csv_path, rename_map={**METRIC_RENAME_MAP, "\u7248\u672c": "\u7248\u672c\u53f7"})
     timing_header, timing_rows = normalize_timing_table(timing_header, timing_rows)
+    timing_header, timing_rows = fill_timing_conversion_rates(timing_header, timing_rows)
     if feature_csv_path:
         feature_header, feature_rows = read_csv_rows(feature_csv_path, rename_map={**METRIC_RENAME_MAP, "\u7248\u672c": "\u7248\u672c\u53f7"})
     else:
