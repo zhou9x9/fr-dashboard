@@ -154,7 +154,7 @@ const WORKSPACES = {
     },
   },
   adgroup_iteration: {
-    label: "单版本广告组对比",
+    label: "单项目广告组对比",
     note: "固定单项目和单版本后，对比不同广告组之间的新增用户占比与质量指标，判断哪个广告组更值得继续放量。",
     compareDefaults: {
       analysisMode: "single_project",
@@ -1299,7 +1299,7 @@ function renderWorkspaceChrome() {
     detailsTitle.textContent = "数据明细";
     detailsDesc.textContent = "根据当前筛选的首次访问日期和国家，直接查看所勾选版本号之间的数据差异。";
   } else if (appState.activeWorkspace === "adgroup_iteration") {
-    compareControlsTitle.textContent = "单版本广告组对比控制台";
+    compareControlsTitle.textContent = "单项目广告组对比控制台";
     summaryTitle.textContent = "广告组效果速览";
     summaryDesc.textContent = "先判断广告组样本是否足够，再看不同广告组在质量指标上的真实差异。";
     detailsTitle.textContent = "广告组数据明细";
