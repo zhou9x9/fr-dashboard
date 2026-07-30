@@ -51,12 +51,6 @@ const DEFAULT_TIMING_METRICS = [
   "D0人均点击次数",
   "D0通知点击转化率",
 ];
-const DATA_OVERVIEW_METRICS = [
-  "卸载率_D0",
-  "通知授权率_D0",
-  "通知展示率_D0",
-  "通知点击率_D0",
-].filter((metric) => COMPARE_METRICS.includes(metric));
 const SERIES_COLORS = ["#2563eb", "#0f766e", "#64748b", "#f59e0b"];
 const TIMING_SHORT_LABELS = {
   "监听到应用安装": ["应用", "安装"],
@@ -71,17 +65,6 @@ const TIMING_SHORT_LABELS = {
   "有扫描结果未恢复/清理": ["有结果", "未恢复"],
 };
 const WORKSPACES = {
-  data_overview: {
-    label: "数据概览",
-    note: "优先看 D0卸载率、D0通知授权率、D0通知展示率、D0通知点击率，快速定位问题更可能来自项目、日期、国家、版本还是广告组。",
-    compareDefaults: {
-      analysisMode: "cross_project",
-      compareField: "项目代号",
-      countryMode: "multi_country",
-      groupDimensions: ["首次访问日期"],
-      compareMetrics: DATA_OVERVIEW_METRICS,
-    },
-  },
   paid_country: {
     label: "买量国家对比",
     note: "固定报表日期、项目、首次访问日期和版本后，重点看 top 10 国家用户数占比怎么变化，以及不同项目之间的买量结构差异。",
@@ -229,7 +212,7 @@ const WORKSPACES = {
 };
 
 const appState = {
-  activeWorkspace: "data_overview",
+  activeWorkspace: "paid_country",
   analysisMode: "single_project",
   countryMode: "single_country",
   openSelectId: null,
@@ -1091,19 +1074,6 @@ function applyWorkspaceDefaults(workspaceKey) {
     const versions = versionOptionsForRows(baseRowsForAnalysis());
     keepValidSelections("版本号", versions.length ? versions : defaultRecentVersionValues());
   }
-  if (workspaceKey === "data_overview") {
-    keepValidSelections("报表日期", optionsFor("报表日期").slice(-1));
-    const allowedProjects = optionsFor("项目代号").filter((item) => item !== "全部");
-    const validProjects = (appState.filters["项目代号"] || []).filter((item) => allowedProjects.includes(item));
-    appState.filters["项目代号"] = validProjects.length ? validProjects : allowedProjects.slice();
-    keepValidSelections("首次访问日期", optionsFor("首次访问日期").slice(-5));
-    applySharedProjectDateToWorkspace(workspaceKey);
-    appState.filters["国家"] = ["全部"];
-    appState.filters["广告组"] = ["全部"];
-    appState.filters["版本号"] = ["全部"];
-    appState.compareValues = appState.filters["项目代号"].slice();
-    appState.compareMetrics = DATA_OVERVIEW_METRICS.slice();
-  }
   if (workspaceKey === "paid_adgroup") {
     keepValidSelections("报表日期", optionsFor("报表日期").slice(-1));
     const allowedProjects = optionsFor("项目代号").filter((item) => item !== "全部");
@@ -1278,7 +1248,7 @@ function renderWorkspaceChrome() {
   const showCompare = !showTiming && !showFeature;
   const showFunnel = false;
   const showStructure = appState.activeWorkspace === "cross_project";
-  const showCompareDetails = showCompare && !["data_overview", "paid_country", "paid_adgroup"].includes(appState.activeWorkspace);
+  const showCompareDetails = showCompare && !["paid_country", "paid_adgroup"].includes(appState.activeWorkspace);
 
   setHidden(sections.compareControls, !showCompare);
   setHidden(sections.compareSummary, !showCompare);
@@ -1304,13 +1274,7 @@ function renderWorkspaceChrome() {
   const featureTitle = document.querySelector("#feature-title");
   const featureDesc = document.querySelector("#feature-desc");
 
-  if (appState.activeWorkspace === "data_overview") {
-    compareControlsTitle.textContent = "数据概览控制台";
-    summaryTitle.textContent = "数据问题定位";
-    summaryDesc.textContent = "从 D0卸载率开始，依次检查授权、展示和点击，快速判断差距主要出在哪个维度。";
-    detailsTitle.textContent = "数据概览明细";
-    detailsDesc.textContent = "当前菜单以诊断卡片为主，普通明细表暂不展示。";
-  } else if (appState.activeWorkspace === "paid_country") {
+  if (appState.activeWorkspace === "paid_country") {
     compareControlsTitle.textContent = "买量国家对比控制台";
     summaryTitle.textContent = "买量国家对比速览";
     summaryDesc.textContent = "先看 top 10 国家用户占比在时间维度上的变化，再看不同项目之间的横向差异。";
@@ -1375,9 +1339,6 @@ function baseRowsForAnalysis() {
 }
 
 function availableCompareFields() {
-  if (appState.activeWorkspace === "data_overview") {
-    return ["项目代号"];
-  }
   if (appState.activeWorkspace === "paid_country") {
     return ["国家"];
   }
@@ -1393,9 +1354,6 @@ function availableCompareFields() {
 }
 
 function activeFilterFields() {
-  if (appState.activeWorkspace === "data_overview") {
-    return ["报表日期", "项目代号", "首次访问日期", "国家", "广告组", "版本号"];
-  }
   if (appState.activeWorkspace === "paid_country") {
     return ["报表日期", "项目代号", "首次访问日期"];
   }
@@ -1412,9 +1370,6 @@ function activeFilterFields() {
 }
 
 function visibleFilterFields(compareField) {
-  if (appState.activeWorkspace === "data_overview") {
-    return activeFilterFields();
-  }
   if (appState.activeWorkspace === "version_iteration" && compareField === "版本号") {
     return activeFilterFields();
   }
@@ -1696,7 +1651,7 @@ function applyDimensionFilters(rows, filters) {
 }
 
 function computeCompareAnalysis() {
-  if (["data_overview", "cross_project"].includes(appState.activeWorkspace)) {
+  if (appState.activeWorkspace === "cross_project") {
     appState.compareField = "项目代号";
     const selectedProjects = (appState.filters["项目代号"] || []).filter((value) => value !== "全部");
     if (selectedProjects.length) {
@@ -2027,220 +1982,10 @@ function aggregateInterpretation(context, metric) {
   return `${metric} 当前更适合作为加权总体差异来理解，不建议直接总结成“最好值”。`;
 }
 
-function overviewDimensionLabel(field) {
-  const labels = {
-    项目代号: "项目",
-    首次访问日期: "日期",
-    国家: "国家",
-    版本号: "版本",
-    广告组: "广告组",
-  };
-  return labels[field] || field;
-}
-
-function overviewMetricProblemText(metric, value) {
-  if (metric.includes("卸载率")) {
-    return `${formatMetric(metric, value)}，偏高`;
-  }
-  return `${formatMetric(metric, value)}，偏低`;
-}
-
-function formatOverviewGap(metric, value) {
-  const kind = dashboardData.metricMeta[metric]?.kind;
-  if (kind === "rate") {
-    return `${(value * 100).toFixed(2)} pct`;
-  }
-  return formatMetric(metric, value);
-}
-
-function overviewCandidateValues(rows, field) {
-  const selected = (appState.filters[field] || []).filter((value) => value !== "全部");
-  if (selected.length) {
-    return selected;
-  }
-  if (field === "项目代号") {
-    return optionsFor("项目代号").filter((value) => value !== "全部");
-  }
-  if (field === "广告组") {
-    return adGroupOptionsForRows(rows).filter((value) => value !== "全部" && !isNotSetValue(value)).slice(0, 10);
-  }
-  if (field === "国家") {
-    return topValuesByUsers(rows, "国家").slice(0, 10);
-  }
-  if (field === "版本号") {
-    return versionOptionsForRows(rows).slice(-10);
-  }
-  return optionsForRows(rows, field).filter((value) => value !== "全部").slice(-10);
-}
-
-function overviewRowsExcept(field) {
-  const filters = {};
-  for (const dimension of DIMENSION_LABELS) {
-    if (dimension === field) continue;
-    filters[dimension] = appState.filters[dimension] || [];
-  }
-  return applyDimensionFilters(dashboardData.main.rows, filters);
-}
-
-function overviewMetricGapForDimension(metric, field) {
-  const sourceRows = overviewRowsExcept(field);
-  const candidates = overviewCandidateValues(sourceRows, field);
-  const values = candidates
-    .map((subject) => {
-      const rows = applyDimensionFilters(sourceRows, { [field]: [subject] });
-      const aggregated = rows.length ? aggregateRows(rows, [metric, "新增用户数"]) : null;
-      const value = aggregated?.[metric];
-      const users = aggregated?.["新增用户数"] || 0;
-      if (value === null || value === undefined || Number.isNaN(Number(value))) {
-        return null;
-      }
-      return { subject, value, users };
-    })
-    .filter(Boolean)
-    .filter((item) => item.users > 0);
-
-  if (values.length < 2) {
-    return null;
-  }
-  const lowerBetter = metric.includes("卸载率");
-  const ranked = values.slice().sort((a, b) => lowerBetter ? b.value - a.value : a.value - b.value);
-  const problem = ranked[0];
-  const reference = ranked[ranked.length - 1];
-  const diff = Math.abs(problem.value - reference.value);
-  return {
-    metric,
-    field,
-    label: overviewDimensionLabel(field),
-    values,
-    problem,
-    reference,
-    diff,
-    lowerBetter,
-  };
-}
-
-function computeDataOverview() {
-  const filteredRows = applyDimensionFilters(dashboardData.main.rows, appState.filters);
-  const overall = filteredRows.length ? aggregateRows(filteredRows, ["新增用户数", ...DATA_OVERVIEW_METRICS]) : null;
-  const dimensions = ["项目代号", "首次访问日期", "国家", "版本号", "广告组"];
-  const metricInsights = DATA_OVERVIEW_METRICS.map((metric) => {
-    const dimensionInsights = dimensions
-      .map((field) => overviewMetricGapForDimension(metric, field))
-      .filter(Boolean)
-      .sort((a, b) => b.diff - a.diff);
-    return {
-      metric,
-      overallValue: overall?.[metric],
-      bestDimension: dimensionInsights[0] || null,
-      dimensionInsights,
-    };
-  });
-  const firstIssue = metricInsights.find((item) => item.bestDimension);
-  return {
-    filteredRows,
-    overall,
-    metricInsights,
-    firstIssue,
-  };
-}
-
-function renderDataOverviewSummary(host) {
-  const overview = computeDataOverview();
-  if (!overview.filteredRows.length || !overview.overall) {
-    host.innerHTML = `<div class="empty-state">当前筛选下没有数据，请调整项目、日期、国家、版本或广告组。</div>`;
-    return;
-  }
-
-  const totalUsers = overview.overall["新增用户数"] || 0;
-  const uninstallInsight = overview.metricInsights.find((item) => item.metric === "卸载率_D0");
-  const primary = uninstallInsight?.bestDimension || overview.firstIssue?.bestDimension;
-  const primaryText = primary
-    ? `优先看 <strong>${primary.label}</strong>：<strong>${primary.problem.subject}</strong> 的 ${primary.metric} ${overviewMetricProblemText(primary.metric, primary.problem.value)}，与 ${primary.reference.subject} 相差 <strong>${formatOverviewGap(primary.metric, primary.diff)}</strong>。`
-    : "当前四个核心指标在所选范围内没有拉开明显差距。";
-
-  const metricCards = overview.metricInsights.map((item) => {
-    const insight = item.bestDimension;
-    const isUninstall = item.metric.includes("卸载率");
-    return `
-      <article class="stat-card" style="padding:22px 24px;">
-        <div class="eyebrow">${isUninstall ? "第一优先级" : "核心链路"}</div>
-        <div class="stat-title" style="font-size:24px; line-height:1.25;">${item.metric}</div>
-        <div class="stat-value" style="font-size:30px;">${formatMetric(item.metric, item.overallValue)}</div>
-        ${
-          insight
-            ? `<div class="muted" style="line-height:1.8;">
-                差距最大维度：<strong>${insight.label}</strong><br/>
-                问题对象：<strong>${insight.problem.subject}</strong>（${formatMetric(item.metric, insight.problem.value)}）<br/>
-                对照对象：${insight.reference.subject}（${formatMetric(item.metric, insight.reference.value)}）
-              </div>`
-            : `<div class="muted">当前筛选下可比较对象不足，暂时无法判断差距来源。</div>`
-        }
-      </article>
-    `;
-  }).join("");
-
-  const rows = overview.metricInsights.flatMap((item) =>
-    item.dimensionInsights.slice(0, 3).map((insight) => ({
-      metric: item.metric,
-      ...insight,
-    }))
-  );
-  const tableRows = rows.map((item) => `
-    <tr>
-      <th>${item.metric}</th>
-      <td>${item.label}</td>
-      <td><strong>${item.problem.subject}</strong><br/><span class="muted">${formatMetric(item.metric, item.problem.value)}</span></td>
-      <td>${item.reference.subject}<br/><span class="muted">${formatMetric(item.metric, item.reference.value)}</span></td>
-      <td class="diff-cell">${formatOverviewGap(item.metric, item.diff)}</td>
-      <td>${item.metric.includes("卸载率") ? "优先排查偏高对象，卸载率越高越差。" : "优先排查偏低对象，链路率越低越差。"}</td>
-    </tr>
-  `).join("");
-
-  host.innerHTML = `
-    <div class="warning-banner" style="margin-bottom:20px;">
-      ${primaryText}
-    </div>
-    <div class="stats-grid" style="margin-bottom:22px;">
-      <article class="stat-card" style="padding:22px 24px;">
-        <div class="eyebrow">当前样本</div>
-        <div class="stat-title">筛选范围新增用户</div>
-        <div class="stat-value">${Math.round(totalUsers).toLocaleString("zh-CN")}</div>
-        <div class="muted">四个核心指标均按新增用户数加权汇总。</div>
-      </article>
-      ${metricCards}
-    </div>
-    <div class="panel-title" style="margin-top:6px;">
-      <div>
-        <h2>问题定位明细</h2>
-        <p class="muted">每个指标最多列出差距最大的前三个维度，先看卸载率，再看授权、展示和点击。</p>
-      </div>
-    </div>
-    <div class="table-wrap">
-      <table class="metric-table">
-        <thead>
-          <tr>
-            <th>指标</th>
-            <th>差距维度</th>
-            <th>问题对象</th>
-            <th>对照对象</th>
-            <th>差距</th>
-            <th>解读</th>
-          </tr>
-        </thead>
-        <tbody>${tableRows || `<tr><td colspan="6">当前没有足够的横向差距可展示。</td></tr>`}</tbody>
-      </table>
-    </div>
-  `;
-}
-
 function renderCompareSummary(analysis) {
   const host = document.querySelector("#compare-summary");
   if (!analysis.filteredRows.length) {
     host.innerHTML = `<div class="empty-state">当前筛选下没有可对比的数据。</div>`;
-    return;
-  }
-  if (appState.activeWorkspace === "data_overview") {
-    renderDataOverviewSummary(host);
     return;
   }
   if (appState.activeWorkspace === "paid_country") {
@@ -5105,7 +4850,6 @@ function buildControlSection() {
   const groupDimensionsWrap = document.querySelector("#group-dimensions")?.closest(".control-block");
   const compareMetricsWrap = document.querySelector("#compare-metrics")?.closest(".control-block");
   const compareCountryLabel = document.querySelector("#compare-controls-panel [data-filter='国家']")?.closest(".control-block")?.querySelector("label");
-  const isDataOverview = appState.activeWorkspace === "data_overview";
   const isPaidCountry = appState.activeWorkspace === "paid_country";
   const isPaidShareWorkspace = ["paid_country", "paid_adgroup"].includes(appState.activeWorkspace);
   if (analysisModeBlock) {
@@ -5120,7 +4864,7 @@ function buildControlSection() {
   if (countryModeBlock) {
     countryModeBlock.style.display = "none";
   }
-  const shouldHideCompareValues = isDataOverview || isPaidShareWorkspace || appState.activeWorkspace === "version_iteration" || appState.activeWorkspace === "adgroup_iteration" || appState.activeWorkspace === "cross_project";
+  const shouldHideCompareValues = isPaidShareWorkspace || appState.activeWorkspace === "version_iteration" || appState.activeWorkspace === "adgroup_iteration" || appState.activeWorkspace === "cross_project";
   if (compareValuesBlock) {
     compareValuesBlock.style.setProperty("display", shouldHideCompareValues ? "none" : "", shouldHideCompareValues ? "important" : "");
     compareValuesBlock.hidden = shouldHideCompareValues;
@@ -5135,16 +4879,16 @@ function buildControlSection() {
     compareValuesLabel.textContent = appState.activeWorkspace === "country_opt" ? "国家" : "参与对比的主体值";
   }
   if (groupDimensionsBlock) {
-    groupDimensionsBlock.style.display = isDataOverview || isPaidShareWorkspace ? "none" : "";
+    groupDimensionsBlock.style.display = isPaidShareWorkspace ? "none" : "";
   }
   if (groupDimensionsWrap) {
-    groupDimensionsWrap.style.display = isDataOverview || isPaidShareWorkspace ? "none" : "";
+    groupDimensionsWrap.style.display = isPaidShareWorkspace ? "none" : "";
   }
   if (compareMetricsBlock) {
-    compareMetricsBlock.style.display = isDataOverview || isPaidShareWorkspace ? "none" : "";
+    compareMetricsBlock.style.display = isPaidShareWorkspace ? "none" : "";
   }
   if (compareMetricsWrap) {
-    compareMetricsWrap.style.display = isDataOverview || isPaidShareWorkspace ? "none" : "";
+    compareMetricsWrap.style.display = isPaidShareWorkspace ? "none" : "";
   }
   if (compareCountryLabel) {
     compareCountryLabel.textContent = appState.activeWorkspace === "cross_project" ? "共有国家" : "国家";
@@ -5200,13 +4944,6 @@ function buildControlSection() {
     appState.countryMode = "multi_country";
     appState.groupDimensions = ["首次访问日期"];
     appState.compareMetrics = filteredMetrics(WORKSPACES.paid_country.compareDefaults.compareMetrics);
-  }
-  if (appState.activeWorkspace === "data_overview") {
-    appState.compareField = "项目代号";
-    appState.countryMode = "multi_country";
-    appState.groupDimensions = ["首次访问日期"];
-    appState.compareMetrics = DATA_OVERVIEW_METRICS.slice();
-    appState.compareValues = (appState.filters["项目代号"] || []).filter((item) => item !== "全部");
   }
   if (appState.activeWorkspace === "paid_adgroup") {
     appState.compareField = "广告组";
@@ -5400,7 +5137,7 @@ function buildControlSection() {
 
   const versionControl = document.querySelector("[data-control='version-filter']");
   if (versionControl) {
-    versionControl.style.display = isDataOverview || (appState.analysisMode === "single_project" && !isPaidShareWorkspace) ? "" : "none";
+    versionControl.style.display = appState.analysisMode === "single_project" && !isPaidShareWorkspace ? "" : "none";
   }
   const compareValuesControl = document.querySelector("#compare-values")?.closest(".control-block");
   if (compareValuesControl) {
