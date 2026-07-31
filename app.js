@@ -51,6 +51,49 @@ const DEFAULT_TIMING_METRICS = [
   "D0人均点击次数",
   "D0通知点击转化率",
 ];
+const DATA_OVERVIEW_METRICS = [
+  "D1留存率",
+  "卸载率_D0",
+  "通知授权率_D0",
+  "通知展示率_D0",
+  "通知点击率_D0",
+].filter((metric) => COMPARE_METRICS.includes(metric));
+const OVERVIEW_FIRST_LAUNCH_METRIC = "首页到达率_D0";
+const OVERVIEW_HEALTH_SECTIONS = [
+  {
+    key: "retention",
+    label: "留存",
+    metrics: ["D1留存率"],
+    weight: 5,
+    targetWorkspace: "country_opt",
+  },
+  {
+    key: "uninstall",
+    label: "卸载",
+    metrics: ["卸载率_D0"],
+    weight: 4,
+    lowerBetter: true,
+    targetWorkspace: "country_opt",
+  },
+  {
+    key: "notification",
+    label: "通知",
+    metrics: ["通知授权率_D0", "通知展示率_D0", "通知点击率_D0"],
+    weight: 4,
+    targetWorkspace: "notification_copy",
+  },
+  {
+    key: "first_launch",
+    label: "首次启动",
+    metrics: [OVERVIEW_FIRST_LAUNCH_METRIC],
+    weight: 3,
+    source: "feature",
+    featureAnalysisType: "首次启动流程漏斗",
+    featureObject: "首页展示数",
+    featureDay: "D0",
+    targetWorkspace: "feature_module",
+  },
+];
 const SERIES_COLORS = ["#2563eb", "#0f766e", "#64748b", "#f59e0b"];
 const TIMING_SHORT_LABELS = {
   "监听到应用安装": ["应用", "安装"],
@@ -65,6 +108,17 @@ const TIMING_SHORT_LABELS = {
   "有扫描结果未恢复/清理": ["有结果", "未恢复"],
 };
 const WORKSPACES = {
+  data_overview: {
+    label: "数据概览",
+    note: "优先看 D0卸载率、D0通知授权率、D0通知展示率、D0通知点击率，快速定位问题更可能来自项目、日期、国家还是版本。",
+    compareDefaults: {
+      analysisMode: "cross_project",
+      compareField: "项目代号",
+      countryMode: "multi_country",
+      groupDimensions: ["首次访问日期"],
+      compareMetrics: DATA_OVERVIEW_METRICS,
+    },
+  },
   paid_country: {
     label: "买量国家对比",
     note: "固定报表日期、项目、首次访问日期和版本后，重点看 top 10 国家用户数占比怎么变化，以及不同项目之间的买量结构差异。",
@@ -212,7 +266,7 @@ const WORKSPACES = {
 };
 
 const appState = {
-  activeWorkspace: "paid_country",
+  activeWorkspace: "data_overview",
   analysisMode: "single_project",
   countryMode: "single_country",
   openSelectId: null,
@@ -563,6 +617,38 @@ function defaultRecentVersionValues(rows = dashboardData.main.rows) {
     uniqueValues(rows, "版本号").filter((value) => value !== "全部")
   );
   return versions.slice(-2);
+}
+
+function parseDateValue(value) {
+  const date = new Date(`${value}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatDateValue(date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function addDateDays(value, offset) {
+  const date = parseDateValue(value);
+  if (!date) return null;
+  date.setUTCDate(date.getUTCDate() + offset);
+  return formatDateValue(date);
+}
+
+function overviewPeriodDates(offsets) {
+  const reportDate = appState.filters["报表日期"]?.[0] || optionsFor("报表日期").slice(-1)[0];
+  const availableDates = new Set(optionsFor("首次访问日期"));
+  return offsets
+    .map((offset) => addDateDays(reportDate, offset))
+    .filter((value) => value && availableDates.has(value));
+}
+
+function overviewCurrentPeriodDates() {
+  return overviewPeriodDates([-4, -3, -2]);
+}
+
+function overviewPreviousPeriodDates() {
+  return overviewPeriodDates([-7, -6, -5]);
 }
 
 function versionOptionsForRows(rows) {
@@ -1074,6 +1160,19 @@ function applyWorkspaceDefaults(workspaceKey) {
     const versions = versionOptionsForRows(baseRowsForAnalysis());
     keepValidSelections("版本号", versions.length ? versions : defaultRecentVersionValues());
   }
+  if (workspaceKey === "data_overview") {
+    keepValidSelections("报表日期", optionsFor("报表日期").slice(-1));
+    const allowedProjects = optionsFor("项目代号").filter((item) => item !== "全部");
+    const validProjects = (appState.filters["项目代号"] || []).filter((item) => allowedProjects.includes(item));
+    appState.filters["项目代号"] = validProjects.length ? validProjects : allowedProjects.slice();
+    keepValidSelections("首次访问日期", overviewCurrentPeriodDates());
+    applySharedProjectDateToWorkspace(workspaceKey);
+    appState.filters["国家"] = ["全部"];
+    appState.filters["广告组"] = ["全部"];
+    appState.filters["版本号"] = ["全部"];
+    appState.compareValues = appState.filters["项目代号"].slice();
+    appState.compareMetrics = DATA_OVERVIEW_METRICS.slice();
+  }
   if (workspaceKey === "paid_adgroup") {
     keepValidSelections("报表日期", optionsFor("报表日期").slice(-1));
     const allowedProjects = optionsFor("项目代号").filter((item) => item !== "全部");
@@ -1248,7 +1347,7 @@ function renderWorkspaceChrome() {
   const showCompare = !showTiming && !showFeature;
   const showFunnel = false;
   const showStructure = appState.activeWorkspace === "cross_project";
-  const showCompareDetails = showCompare && !["paid_country", "paid_adgroup"].includes(appState.activeWorkspace);
+  const showCompareDetails = showCompare && !["data_overview", "paid_country", "paid_adgroup"].includes(appState.activeWorkspace);
 
   setHidden(sections.compareControls, !showCompare);
   setHidden(sections.compareSummary, !showCompare);
@@ -1274,7 +1373,13 @@ function renderWorkspaceChrome() {
   const featureTitle = document.querySelector("#feature-title");
   const featureDesc = document.querySelector("#feature-desc");
 
-  if (appState.activeWorkspace === "paid_country") {
+  if (appState.activeWorkspace === "data_overview") {
+    compareControlsTitle.textContent = "数据概览控制台";
+    summaryTitle.textContent = "数据问题定位";
+    summaryDesc.textContent = "从 D0卸载率开始，依次检查授权、展示和点击，快速判断差距主要出在哪个维度。";
+    detailsTitle.textContent = "数据概览明细";
+    detailsDesc.textContent = "当前菜单以诊断卡片为主，普通明细表暂不展示。";
+  } else if (appState.activeWorkspace === "paid_country") {
     compareControlsTitle.textContent = "买量国家对比控制台";
     summaryTitle.textContent = "买量国家对比速览";
     summaryDesc.textContent = "先看 top 10 国家用户占比在时间维度上的变化，再看不同项目之间的横向差异。";
@@ -1339,6 +1444,9 @@ function baseRowsForAnalysis() {
 }
 
 function availableCompareFields() {
+  if (appState.activeWorkspace === "data_overview") {
+    return ["项目代号"];
+  }
   if (appState.activeWorkspace === "paid_country") {
     return ["国家"];
   }
@@ -1354,6 +1462,9 @@ function availableCompareFields() {
 }
 
 function activeFilterFields() {
+  if (appState.activeWorkspace === "data_overview") {
+    return ["报表日期", "项目代号", "首次访问日期", "国家", "版本号"];
+  }
   if (appState.activeWorkspace === "paid_country") {
     return ["报表日期", "项目代号", "首次访问日期"];
   }
@@ -1370,6 +1481,9 @@ function activeFilterFields() {
 }
 
 function visibleFilterFields(compareField) {
+  if (appState.activeWorkspace === "data_overview") {
+    return activeFilterFields();
+  }
   if (appState.activeWorkspace === "version_iteration" && compareField === "版本号") {
     return activeFilterFields();
   }
@@ -1651,7 +1765,7 @@ function applyDimensionFilters(rows, filters) {
 }
 
 function computeCompareAnalysis() {
-  if (appState.activeWorkspace === "cross_project") {
+  if (["data_overview", "cross_project"].includes(appState.activeWorkspace)) {
     appState.compareField = "项目代号";
     const selectedProjects = (appState.filters["项目代号"] || []).filter((value) => value !== "全部");
     if (selectedProjects.length) {
@@ -1982,10 +2096,641 @@ function aggregateInterpretation(context, metric) {
   return `${metric} 当前更适合作为加权总体差异来理解，不建议直接总结成“最好值”。`;
 }
 
+function overviewMetricDirection(metric) {
+  return metric.includes("卸载率") ? "lower" : "higher";
+}
+
+function overviewMetricGap(metric, current, benchmark) {
+  if (current === null || benchmark === null || current === undefined || benchmark === undefined) {
+    return null;
+  }
+  return current - benchmark;
+}
+
+function overviewBadGap(metric, gap) {
+  if (gap === null || gap === undefined || Number.isNaN(gap)) return 0;
+  return overviewMetricDirection(metric) === "lower" ? Math.max(0, gap) : Math.max(0, -gap);
+}
+
+function overviewBadTrend(metric, trend) {
+  if (trend === null || trend === undefined || Number.isNaN(trend)) return 0;
+  return overviewMetricDirection(metric) === "lower" ? Math.max(0, trend) : Math.max(0, -trend);
+}
+
+function overviewStatusFromMetric(metric, gap, trend) {
+  const badGap = overviewBadGap(metric, gap);
+  const badTrend = overviewBadTrend(metric, trend);
+  if (badGap >= 0.08 || badTrend >= 0.05) return "critical";
+  if (badGap >= 0.04 || badTrend >= 0.03) return "risk";
+  if (badGap >= 0.02 || badTrend >= 0.01) return "watch";
+  return "healthy";
+}
+
+function overviewWorstStatus(statuses) {
+  const rank = { healthy: 0, watch: 1, risk: 2, critical: 3, insufficient: 1, unavailable: 0 };
+  return statuses.slice().sort((a, b) => (rank[b] || 0) - (rank[a] || 0))[0] || "healthy";
+}
+
+function overviewStatusLabel(status) {
+  return {
+    healthy: "健康",
+    watch: "观察",
+    risk: "风险",
+    critical: "严重",
+    insufficient: "样本不足",
+    unavailable: "暂未接入",
+  }[status] || status;
+}
+
+function overviewStatusClass(status) {
+  return {
+    healthy: "success-banner",
+    watch: "warning-banner",
+    risk: "warning-banner",
+    critical: "warning-banner",
+    insufficient: "warning-banner",
+    unavailable: "success-banner",
+  }[status] || "warning-banner";
+}
+
+function overviewFormatPp(value) {
+  if (value === null || value === undefined || Number.isNaN(value)) return "暂无";
+  const sign = value > 0 ? "+" : value < 0 ? "-" : "";
+  return `${sign}${Math.abs(value * 100).toFixed(2)}个百分点`;
+}
+
+function overviewFormatMetric(metric, value) {
+  if (value === null || value === undefined || Number.isNaN(value)) return "暂无";
+  if (metric === OVERVIEW_FIRST_LAUNCH_METRIC) {
+    return `${(Number(value) * 100).toFixed(2)}%`;
+  }
+  return formatMetric(metric, value).replace("NA", "暂无");
+}
+
+function overviewCurrentDates() {
+  const selected = (appState.filters["首次访问日期"] || []).filter((value) => value !== "全部");
+  return selected.length ? selected : overviewCurrentPeriodDates();
+}
+
+function overviewPreviousDates(currentDates) {
+  const defaultCurrent = overviewCurrentPeriodDates().join("|");
+  if (currentDates.join("|") === defaultCurrent) {
+    return overviewPreviousPeriodDates();
+  }
+  const availableDates = new Set(optionsFor("首次访问日期"));
+  return currentDates
+    .map((date) => addDateDays(date, -3))
+    .filter((date) => date && availableDates.has(date));
+}
+
+function overviewBaseFilters(extra = {}) {
+  return {
+    报表日期: appState.filters["报表日期"] || [],
+    项目代号: appState.filters["项目代号"] || [],
+    国家: appState.filters["国家"] || [],
+    广告组: [],
+    版本号: appState.filters["版本号"] || [],
+    ...extra,
+  };
+}
+
+function overviewRowsForDates(dates, filters = {}) {
+  return applyDimensionFilters(dashboardData.main.rows, {
+    ...overviewBaseFilters(filters),
+    首次访问日期: dates,
+  });
+}
+
+function overviewValidRowsForSubject(field, subject, dates, filters = {}) {
+  const rows = overviewRowsForDates(dates, { ...filters, [field]: [subject] });
+  const validDates = [];
+  const weakDates = [];
+  dates.forEach((date) => {
+    const dayRows = rows.filter((row) => row["首次访问日期"] === date);
+    const users = dayRows.length ? aggregateRows(dayRows, ["新增用户数"])?.["新增用户数"] || 0 : 0;
+    if (users > 200) {
+      validDates.push(date);
+    } else {
+      weakDates.push({ date, users });
+    }
+  });
+  return {
+    rows: rows.filter((row) => validDates.includes(row["首次访问日期"])),
+    validDates,
+    weakDates,
+  };
+}
+
+function overviewSubjectValues(field, dates, filters = {}) {
+  const sourceRows = overviewRowsForDates(dates, filters);
+  const selected = (appState.filters[field] || []).filter((value) => value !== "全部");
+  if (selected.length) return selected;
+  if (field === "项目代号") return optionsFor("项目代号").filter((value) => value !== "全部");
+  if (field === "国家") return topValuesByUsers(sourceRows, "国家").slice(0, 8);
+  if (field === "版本号") return versionOptionsForRows(sourceRows).slice(-6);
+  return optionsForRows(sourceRows, field).filter((value) => value !== "全部").slice(0, 8);
+}
+
+function overviewMetricBenchmark(metric, subjectStats) {
+  const candidates = subjectStats.filter((item) => item.current !== null && item.status !== "insufficient");
+  if (!candidates.length) return null;
+  const lowerBetter = overviewMetricDirection(metric) === "lower";
+  return candidates.slice().sort((a, b) => lowerBetter ? a.current - b.current : b.current - a.current)[0];
+}
+
+function overviewBuildMetricStats(field, subjects, metric, currentDates, previousDates, filters = {}) {
+  const rawStats = subjects.map((subject) => {
+    const currentSample = overviewValidRowsForSubject(field, subject, currentDates, filters);
+    const previousSample = overviewValidRowsForSubject(field, subject, previousDates, filters);
+    const currentAgg = currentSample.rows.length ? aggregateRows(currentSample.rows, [metric, "新增用户数"]) : null;
+    const previousAgg = previousSample.rows.length ? aggregateRows(previousSample.rows, [metric]) : null;
+    return {
+      subject,
+      current: currentAgg?.[metric] ?? null,
+      previous: previousAgg?.[metric] ?? null,
+      users: currentAgg?.["新增用户数"] || 0,
+      validDays: currentSample.validDates.length,
+      totalDays: currentDates.length,
+      weakDates: currentSample.weakDates,
+      status: currentSample.validDates.length ? "pending" : "insufficient",
+    };
+  });
+  const benchmark = overviewMetricBenchmark(metric, rawStats);
+  return rawStats.map((item) => {
+    if (item.status === "insufficient") {
+      return { ...item, benchmark: benchmark?.current ?? null, gap: null, trend: null, status: "insufficient" };
+    }
+    const gap = overviewMetricGap(metric, item.current, benchmark?.current ?? null);
+    const trend = item.previous === null || item.previous === undefined ? null : item.current - item.previous;
+    return {
+      ...item,
+      benchmark: benchmark?.current ?? null,
+      benchmarkSubject: benchmark?.subject || null,
+      gap,
+      trend,
+      status: overviewStatusFromMetric(metric, gap, trend),
+    };
+  });
+}
+
+function overviewFeatureRowsForDates(dates, section, filters = {}) {
+  return applyDimensionFilters(featureRows(), {
+    报表日期: appState.filters["报表日期"] || [],
+    项目代号: appState.filters["项目代号"] || [],
+    国家: appState.filters["国家"] || [],
+    版本号: appState.filters["版本号"] || [],
+    分析类型: [section.featureAnalysisType],
+    ...filters,
+    首次访问日期: dates,
+  });
+}
+
+function overviewValidFeatureRowsForSubject(field, subject, dates, section, filters = {}) {
+  const rows = overviewFeatureRowsForDates(dates, section, { ...filters, [field]: [subject] });
+  const validDates = [];
+  const weakDates = [];
+  dates.forEach((date) => {
+    const dayRows = rows.filter((row) => row["首次访问日期"] === date);
+    const users = dayRows.length ? featureSampleUsersForRows(dayRows) : 0;
+    if (users > 200) {
+      validDates.push(date);
+    } else {
+      weakDates.push({ date, users });
+    }
+  });
+  return {
+    rows: rows.filter((row) => validDates.includes(row["首次访问日期"])),
+    validDates,
+    weakDates,
+  };
+}
+
+function overviewBuildFeatureStats(field, subjects, section, currentDates, previousDates, filters = {}) {
+  const metric = section.metrics[0];
+  const rawStats = subjects.map((subject) => {
+    const currentSample = overviewValidFeatureRowsForSubject(field, subject, currentDates, section, filters);
+    const previousSample = overviewValidFeatureRowsForSubject(field, subject, previousDates, section, filters);
+    const currentValue = currentSample.rows.length
+      ? weightedFeatureValue(currentSample.rows, section.featureObject, section.featureDay)
+      : null;
+    const previousValue = previousSample.rows.length
+      ? weightedFeatureValue(previousSample.rows, section.featureObject, section.featureDay)
+      : null;
+    return {
+      subject,
+      current: currentValue,
+      previous: previousValue,
+      users: featureSampleUsersForRows(currentSample.rows),
+      validDays: currentSample.validDates.length,
+      totalDays: currentDates.length,
+      weakDates: currentSample.weakDates,
+      status: currentSample.validDates.length ? "pending" : "insufficient",
+    };
+  });
+  const benchmark = overviewMetricBenchmark(metric, rawStats);
+  return rawStats.map((item) => {
+    if (item.status === "insufficient") {
+      return { ...item, benchmark: benchmark?.current ?? null, gap: null, trend: null, status: "insufficient" };
+    }
+    const gap = overviewMetricGap(metric, item.current, benchmark?.current ?? null);
+    const trend = item.previous === null || item.previous === undefined ? null : item.current - item.previous;
+    return {
+      ...item,
+      benchmark: benchmark?.current ?? null,
+      benchmarkSubject: benchmark?.subject || null,
+      gap,
+      trend,
+      status: overviewStatusFromMetric(metric, gap, trend),
+    };
+  });
+}
+
+function overviewFeatureSectionStats(field, subjects, section, currentDates, previousDates, filters = {}) {
+  const metricStats = overviewBuildFeatureStats(field, subjects, section, currentDates, previousDates, filters);
+  return subjects.map((subject) => {
+    const mainMetric = metricStats.find((item) => item.subject === subject);
+    return {
+      subject,
+      section: section.key,
+      label: section.label,
+      current: mainMetric?.current ?? null,
+      benchmark: mainMetric?.benchmark ?? null,
+      gap: mainMetric?.gap ?? null,
+      trend: mainMetric?.trend ?? null,
+      validDays: mainMetric?.validDays || 0,
+      totalDays: currentDates.length,
+      users: mainMetric?.users || 0,
+      status: mainMetric?.status || "insufficient",
+      mainMetric: section.metrics[0],
+      metricStats: mainMetric ? [{ metric: section.metrics[0], ...mainMetric }] : [],
+    };
+  });
+}
+
+function overviewSectionStats(field, subjects, section, currentDates, previousDates, filters = {}) {
+  if (section.source === "feature") {
+    return overviewFeatureSectionStats(field, subjects, section, currentDates, previousDates, filters);
+  }
+  if (section.unavailable || !section.metrics.length) {
+    return subjects.map((subject) => ({
+      subject,
+      section: section.key,
+      label: section.label,
+      current: null,
+      benchmark: null,
+      gap: null,
+      trend: null,
+      validDays: 0,
+      totalDays: currentDates.length,
+      users: 0,
+      status: "unavailable",
+      mainMetric: null,
+      metricStats: [],
+    }));
+  }
+  const metricStatsByMetric = section.metrics.map((metric) => ({
+    metric,
+    stats: overviewBuildMetricStats(field, subjects, metric, currentDates, previousDates, filters),
+  }));
+  return subjects.map((subject) => {
+    const metricStats = metricStatsByMetric.map(({ metric, stats }) => ({
+      metric,
+      ...stats.find((item) => item.subject === subject),
+    })).filter((item) => item.subject);
+    const statuses = metricStats.map((item) => item.status);
+    const worst = overviewWorstStatus(statuses);
+    const mainMetric = metricStats
+      .filter((item) => item.status !== "insufficient")
+      .sort((a, b) => overviewBadGap(b.metric, b.gap) + overviewBadTrend(b.metric, b.trend) - overviewBadGap(a.metric, a.gap) - overviewBadTrend(a.metric, a.trend))[0] || metricStats[0];
+    const valueStats = metricStats.filter((item) => item.current !== null);
+    const current = valueStats.length
+      ? valueStats.reduce((sum, item) => sum + item.current, 0) / valueStats.length
+      : null;
+    return {
+      subject,
+      section: section.key,
+      label: section.label,
+      current,
+      benchmark: mainMetric?.benchmark ?? null,
+      gap: mainMetric?.gap ?? null,
+      trend: mainMetric?.trend ?? null,
+      validDays: Math.max(...metricStats.map((item) => item.validDays || 0)),
+      totalDays: currentDates.length,
+      users: Math.max(...metricStats.map((item) => item.users || 0)),
+      status: worst,
+      mainMetric: mainMetric?.metric || null,
+      metricStats,
+    };
+  });
+}
+
+function overviewRiskScore(item) {
+  const statusScore = { healthy: 0, watch: 1, risk: 2, critical: 3, insufficient: 1, unavailable: 0 };
+  const section = OVERVIEW_HEALTH_SECTIONS.find((entry) => entry.key === item.section);
+  return (statusScore[item.status] || 0) * (section?.weight || 1);
+}
+
+function overviewDiagnosisForProject(projectStats) {
+  const riskItems = projectStats.filter((item) => ["watch", "risk", "critical"].includes(item.status));
+  const retention = projectStats.find((item) => item.section === "retention");
+  const uninstall = projectStats.find((item) => item.section === "uninstall");
+  const notification = projectStats.find((item) => item.section === "notification");
+  const firstLaunch = projectStats.find((item) => item.section === "first_launch");
+  if (retention && uninstall && ["risk", "critical"].includes(retention.status) && ["risk", "critical"].includes(uninstall.status)) {
+    return { issue: "留存 + 卸载同时异常", reason: "更可能是新用户体验或产品质量问题。", target: "单项目国家对比" };
+  }
+  if (notification && ["risk", "critical"].includes(notification.status)) {
+    const ctr = notification.metricStats.find((item) => item.metric === "通知点击率_D0");
+    const permission = notification.metricStats.find((item) => item.metric === "通知授权率_D0");
+    const show = notification.metricStats.find((item) => item.metric === "通知展示率_D0");
+    if (ctr && ["risk", "critical"].includes(ctr.status) && permission?.status === "healthy" && show?.status === "healthy") {
+      return { issue: "通知点击率异常", reason: "授权和展示相对正常，可能是通知内容或文案吸引力问题。", target: "通知文案对比" };
+    }
+    return { issue: "通知链路异常", reason: "授权、展示或点击中至少一个环节落后于当前最优项目。", target: "通知文案对比" };
+  }
+  if (uninstall && ["risk", "critical"].includes(uninstall.status)) {
+    return { issue: "D0卸载率异常", reason: "卸载率相对当前最优项目偏高，优先查看国家和版本来源。", target: "单项目国家对比" };
+  }
+  if (firstLaunch && ["risk", "critical"].includes(firstLaunch.status)) {
+    return { issue: "首次启动漏斗异常", reason: "D0首页到达率落后或趋势下滑，建议查看首次启动流程漏斗。", target: "功能模块" };
+  }
+  if (riskItems.length) {
+    return { issue: `${riskItems[0].label} 需要关注`, reason: "该模块的差距或趋势出现负向信号。", target: "单项目国家对比" };
+  }
+  return { issue: "暂无明显异常", reason: "核心指标相对稳定，继续观察趋势即可。", target: "买量国家对比" };
+}
+
+function computeDataOverview() {
+  const currentDates = overviewCurrentDates();
+  const previousDates = overviewPreviousDates(currentDates);
+  const selectedProjects = (appState.filters["项目代号"] || []).filter((value) => value !== "全部");
+  const projects = selectedProjects.length ? selectedProjects : optionsFor("项目代号").filter((value) => value !== "全部");
+  const projectSections = OVERVIEW_HEALTH_SECTIONS.flatMap((section) =>
+    overviewSectionStats("项目代号", projects, section, currentDates, previousDates)
+  );
+  const projectMap = new Map(projects.map((project) => [project, []]));
+  projectSections.forEach((item) => projectMap.get(item.subject)?.push(item));
+  const projectCards = projects.map((project) => {
+    const sections = projectMap.get(project) || [];
+    const status = overviewWorstStatus(sections.map((item) => item.status));
+    const score = sections.reduce((sum, item) => sum + overviewRiskScore(item), 0);
+    const diagnosis = overviewDiagnosisForProject(sections);
+    return { project, sections, status, score, diagnosis };
+  }).sort((a, b) => b.score - a.score);
+
+  const kpiSummary = OVERVIEW_HEALTH_SECTIONS.map((section) => {
+    const sectionItems = projectSections.filter((item) => item.section === section.key);
+    return {
+      ...section,
+      status: overviewWorstStatus(sectionItems.map((item) => item.status)),
+      riskCount: sectionItems.filter((item) => ["risk", "critical"].includes(item.status)).length,
+      watchCount: sectionItems.filter((item) => item.status === "watch").length,
+    };
+  });
+
+  return {
+    currentDates,
+    previousDates,
+    projects,
+    projectCards,
+    kpiSummary,
+    abnormalRanking: projectCards.slice().sort((a, b) => b.score - a.score),
+  };
+}
+
+function renderOverviewSectionValue(item) {
+  if (item.status === "unavailable") return "未接入";
+  if (item.status === "insufficient") return "样本不足";
+  return item.mainMetric ? overviewFormatMetric(item.mainMetric, item.current) : "暂无";
+}
+
+function renderOverviewMetricCell(item) {
+  if (!item || item.status === "insufficient") {
+    return `<td>样本不足</td><td>暂无</td><td>暂无</td><td>暂无</td>`;
+  }
+  return `
+    <td>${overviewFormatMetric(item.mainMetric, item.current)}</td>
+    <td>${item.benchmark === null ? "暂无" : overviewFormatMetric(item.mainMetric, item.benchmark)}</td>
+    <td>${overviewFormatPp(item.gap)}</td>
+    <td>${overviewFormatPp(item.trend)}</td>
+  `;
+}
+
+function overviewPrimaryCountry(currentDates) {
+  const selected = (appState.filters["国家"] || []).filter((value) => value !== "全部");
+  if (selected.length === 1) return selected[0];
+  const rows = overviewRowsForDates(currentDates, { 国家: [] });
+  return topValuesByUsers(rows, "国家")[0] || null;
+}
+
+function renderOverviewCountryComparison(overview) {
+  const country = overviewPrimaryCountry(overview.currentDates);
+  if (!country) {
+    return `
+      <div class="panel-title"><div><h2>国家横向对比</h2><p class="muted">当前没有可用于国家横向比较的数据。</p></div></div>
+    `;
+  }
+  const projects = overview.projects;
+  const filters = { 国家: [country], 版本号: appState.filters["版本号"] || [], 广告组: [] };
+  const sections = OVERVIEW_HEALTH_SECTIONS.filter((item) => !item.unavailable && item.key !== "first_launch");
+  const sectionStatsByKey = new Map(sections.map((section) => [
+    section.key,
+    overviewSectionStats("项目代号", projects, section, overview.currentDates, overview.previousDates, filters),
+  ]));
+  const rows = projects.map((project) => {
+    const sectionStats = sections.map((section) =>
+      sectionStatsByKey.get(section.key)?.find((item) => item.subject === project)
+    ).filter(Boolean);
+    const notification = sectionStats.find((item) => item.section === "notification");
+    const ctr = notification?.metricStats.find((item) => item.metric === "通知点击率_D0");
+    return {
+      project,
+      retention: sectionStats.find((item) => item.section === "retention"),
+      uninstall: sectionStats.find((item) => item.section === "uninstall"),
+      notification,
+      ctr,
+      status: overviewWorstStatus(sectionStats.map((item) => item.status)),
+    };
+  });
+  const tableRows = rows.map((item) => `
+    <tr>
+      <th>${item.project}</th>
+      <td>${overviewStatusLabel(item.status)}</td>
+      ${renderOverviewMetricCell(item.retention)}
+      ${renderOverviewMetricCell(item.uninstall)}
+      <td>${item.ctr ? formatMetric("通知点击率_D0", item.ctr.current) : "暂无"}</td>
+    </tr>
+  `).join("");
+  return `
+    <div class="panel-title"><div><h2>国家横向对比</h2><p class="muted">当前只做同一国家下的跨项目比较。当前国家：<strong>${country}</strong>。</p></div></div>
+    <div class="table-wrap" style="margin-bottom:24px;">
+      <table class="metric-table">
+        <thead>
+          <tr>
+            <th>项目</th><th>健康状态</th>
+            <th>D1留存当前值</th><th>D1留存最优值</th><th>D1留存差距</th><th>D1留存趋势</th>
+            <th>D0卸载当前值</th><th>D0卸载最优值</th><th>D0卸载差距</th><th>D0卸载趋势</th>
+            <th>D0通知点击率</th>
+          </tr>
+        </thead>
+        <tbody>${tableRows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderOverviewVersionComparison(overview) {
+  const selectedProjects = (appState.filters["项目代号"] || []).filter((value) => value !== "全部");
+  if (selectedProjects.length !== 1) {
+    return `
+      <div class="panel-title"><div><h2>版本横向对比</h2><p class="muted">版本比较仅在单项目模式显示。请选择一个项目后查看版本差异。</p></div></div>
+    `;
+  }
+  const project = selectedProjects[0];
+  const sourceRows = overviewRowsForDates(overview.currentDates, { 项目代号: [project], 版本号: [] });
+  const versions = versionOptionsForRows(sourceRows).filter((value) => value !== "全部").slice(-6);
+  if (versions.length < 2) {
+    return `
+      <div class="panel-title"><div><h2>版本横向对比</h2><p class="muted">${project} 当前可比较版本不足 2 个。</p></div></div>
+    `;
+  }
+  const sections = OVERVIEW_HEALTH_SECTIONS.filter((item) => !item.unavailable && item.key !== "first_launch");
+  const sectionStatsByKey = new Map(sections.map((section) => [
+    section.key,
+    overviewSectionStats("版本号", versions, section, overview.currentDates, overview.previousDates, {
+      项目代号: [project],
+      国家: appState.filters["国家"] || [],
+      广告组: [],
+    }),
+  ]));
+  const rows = versions.map((version) => {
+    const sectionStats = sections.map((section) =>
+      sectionStatsByKey.get(section.key)?.find((item) => item.subject === version)
+    ).filter(Boolean);
+    const notification = sectionStats.find((item) => item.section === "notification");
+    const ctr = notification?.metricStats.find((item) => item.metric === "通知点击率_D0");
+    return {
+      version,
+      retention: sectionStats.find((item) => item.section === "retention"),
+      uninstall: sectionStats.find((item) => item.section === "uninstall"),
+      ctr,
+      status: overviewWorstStatus(sectionStats.map((item) => item.status)),
+    };
+  });
+  const tableRows = rows.map((item) => `
+    <tr>
+      <th>${item.version}</th>
+      <td>${overviewStatusLabel(item.status)}</td>
+      ${renderOverviewMetricCell(item.retention)}
+      ${renderOverviewMetricCell(item.uninstall)}
+      <td>${item.ctr ? formatMetric("通知点击率_D0", item.ctr.current) : "暂无"}</td>
+    </tr>
+  `).join("");
+  return `
+    <div class="panel-title"><div><h2>版本横向对比</h2><p class="muted">仅比较单项目版本。当前项目：<strong>${project}</strong>。</p></div></div>
+    <div class="table-wrap" style="margin-bottom:24px;">
+      <table class="metric-table">
+        <thead>
+          <tr>
+            <th>版本</th><th>健康状态</th>
+            <th>D1留存当前值</th><th>D1留存最优值</th><th>D1留存差距</th><th>D1留存趋势</th>
+            <th>D0卸载当前值</th><th>D0卸载最优值</th><th>D0卸载差距</th><th>D0卸载趋势</th>
+            <th>D0通知点击率</th>
+          </tr>
+        </thead>
+        <tbody>${tableRows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderDataOverviewSummary(host) {
+  const overview = computeDataOverview();
+  if (!overview.projects.length || !overview.currentDates.length) {
+    host.innerHTML = `<div class="empty-state">当前筛选下没有可用于数据概览的项目或日期。请确认报表日期与首次访问日期。</div>`;
+    return;
+  }
+  const topRisk = overview.abnormalRanking[0];
+  const topIssue = topRisk?.diagnosis;
+  const periodText = `当前期 ${overview.currentDates.join(" / ")}；对比期 ${overview.previousDates.join(" / ") || "暂无可比周期"}`;
+  const kpiCards = overview.kpiSummary.map((item) => `
+    <article class="stat-card">
+      <div class="eyebrow">${item.weight}★ 健康模块</div>
+      <div class="stat-title">${item.label}</div>
+      <div class="stat-value">${overviewStatusLabel(item.status)}</div>
+      <div class="muted">风险 ${item.riskCount} 个项目 / 观察 ${item.watchCount} 个项目</div>
+    </article>
+  `).join("");
+  const projectCards = overview.projectCards.map((project) => {
+    const cells = OVERVIEW_HEALTH_SECTIONS.map((section) => {
+      const item = project.sections.find((entry) => entry.section === section.key);
+      return `
+        <div class="metric-mini">
+          <strong>${section.label}</strong>
+          <span>${item ? renderOverviewSectionValue(item) : "暂无"}</span>
+          <small>${item ? overviewStatusLabel(item.status) : "暂无"} · ${item ? `${item.validDays}/${item.totalDays} 天有效` : ""}</small>
+        </div>
+      `;
+    }).join("");
+    return `
+      <article class="stat-card" style="padding:22px 24px;">
+        <div class="eyebrow">项目健康度</div>
+        <div class="stat-title" style="font-size:24px;">${project.project}</div>
+        <div class="stat-value">${overviewStatusLabel(project.status)}</div>
+        <div class="muted" style="margin:8px 0 14px;">主要问题：<strong>${project.diagnosis.issue}</strong></div>
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap:10px;">${cells}</div>
+      </article>
+    `;
+  }).join("");
+  const rankingRows = overview.abnormalRanking.map((project, index) => `
+    <tr>
+      <th>${index + 1}. ${project.project}</th>
+      <td>${overviewStatusLabel(project.status)}</td>
+      <td>${project.diagnosis.issue}</td>
+      <td>${project.diagnosis.reason}</td>
+      <td>${project.diagnosis.target}</td>
+    </tr>
+  `).join("");
+  const countryBlock = renderOverviewCountryComparison(overview);
+  const versionBlock = renderOverviewVersionComparison(overview);
+  const recommendationCards = overview.abnormalRanking.slice(0, 3).map((project) => `
+    <article class="stat-card">
+      <div class="eyebrow">建议进入</div>
+      <div class="stat-title">${project.project} → ${project.diagnosis.target}</div>
+      <div class="muted">${project.diagnosis.reason}</div>
+    </article>
+  `).join("");
+
+  host.innerHTML = `
+    <div class="${overviewStatusClass(topRisk?.status)}" style="margin-bottom:20px;">
+      <strong>优先关注：</strong>${topRisk ? `${topRisk.project}，${topIssue.issue}。${topIssue.reason}` : "当前暂无明显异常。"}
+      <div class="muted" style="margin-top:6px;">${periodText}。最优值统一采用当前筛选范围内表现最好的项目，差距和趋势均以百分点展示。</div>
+    </div>
+    <div class="stats-grid" style="margin-bottom:22px;">${kpiCards}</div>
+    <div class="panel-title"><div><h2>项目健康度</h2><p class="muted">每个项目一张卡，先看健康状态，再看当前值、差距和趋势的解释入口。</p></div></div>
+    <div class="stats-grid" style="margin-bottom:24px;">${projectCards}</div>
+    <div class="panel-title"><div><h2>异常项目排名</h2><p class="muted">按健康风险排序，风险最高排最前。</p></div></div>
+    <div class="table-wrap" style="margin-bottom:24px;">
+      <table class="metric-table">
+        <thead><tr><th>项目</th><th>健康状态</th><th>主要问题</th><th>可能原因</th><th>建议查看</th></tr></thead>
+        <tbody>${rankingRows}</tbody>
+      </table>
+    </div>
+    ${countryBlock}
+    ${versionBlock}
+    <div class="panel-title"><div><h2>建议进入的分析页</h2><p class="muted">数据概览只负责发现和定位，详细原因进入对应分析页。</p></div></div>
+    <div class="stats-grid">${recommendationCards}</div>
+  `;
+}
+
 function renderCompareSummary(analysis) {
   const host = document.querySelector("#compare-summary");
   if (!analysis.filteredRows.length) {
     host.innerHTML = `<div class="empty-state">当前筛选下没有可对比的数据。</div>`;
+    return;
+  }
+  if (appState.activeWorkspace === "data_overview") {
+    renderDataOverviewSummary(host);
     return;
   }
   if (appState.activeWorkspace === "paid_country") {
@@ -4850,6 +5595,7 @@ function buildControlSection() {
   const groupDimensionsWrap = document.querySelector("#group-dimensions")?.closest(".control-block");
   const compareMetricsWrap = document.querySelector("#compare-metrics")?.closest(".control-block");
   const compareCountryLabel = document.querySelector("#compare-controls-panel [data-filter='国家']")?.closest(".control-block")?.querySelector("label");
+  const isDataOverview = appState.activeWorkspace === "data_overview";
   const isPaidCountry = appState.activeWorkspace === "paid_country";
   const isPaidShareWorkspace = ["paid_country", "paid_adgroup"].includes(appState.activeWorkspace);
   if (analysisModeBlock) {
@@ -4864,7 +5610,7 @@ function buildControlSection() {
   if (countryModeBlock) {
     countryModeBlock.style.display = "none";
   }
-  const shouldHideCompareValues = isPaidShareWorkspace || appState.activeWorkspace === "version_iteration" || appState.activeWorkspace === "adgroup_iteration" || appState.activeWorkspace === "cross_project";
+  const shouldHideCompareValues = isDataOverview || isPaidShareWorkspace || appState.activeWorkspace === "version_iteration" || appState.activeWorkspace === "adgroup_iteration" || appState.activeWorkspace === "cross_project";
   if (compareValuesBlock) {
     compareValuesBlock.style.setProperty("display", shouldHideCompareValues ? "none" : "", shouldHideCompareValues ? "important" : "");
     compareValuesBlock.hidden = shouldHideCompareValues;
@@ -4879,16 +5625,16 @@ function buildControlSection() {
     compareValuesLabel.textContent = appState.activeWorkspace === "country_opt" ? "国家" : "参与对比的主体值";
   }
   if (groupDimensionsBlock) {
-    groupDimensionsBlock.style.display = isPaidShareWorkspace ? "none" : "";
+    groupDimensionsBlock.style.display = isDataOverview || isPaidShareWorkspace ? "none" : "";
   }
   if (groupDimensionsWrap) {
-    groupDimensionsWrap.style.display = isPaidShareWorkspace ? "none" : "";
+    groupDimensionsWrap.style.display = isDataOverview || isPaidShareWorkspace ? "none" : "";
   }
   if (compareMetricsBlock) {
-    compareMetricsBlock.style.display = isPaidShareWorkspace ? "none" : "";
+    compareMetricsBlock.style.display = isDataOverview || isPaidShareWorkspace ? "none" : "";
   }
   if (compareMetricsWrap) {
-    compareMetricsWrap.style.display = isPaidShareWorkspace ? "none" : "";
+    compareMetricsWrap.style.display = isDataOverview || isPaidShareWorkspace ? "none" : "";
   }
   if (compareCountryLabel) {
     compareCountryLabel.textContent = appState.activeWorkspace === "cross_project" ? "共有国家" : "国家";
@@ -4944,6 +5690,13 @@ function buildControlSection() {
     appState.countryMode = "multi_country";
     appState.groupDimensions = ["首次访问日期"];
     appState.compareMetrics = filteredMetrics(WORKSPACES.paid_country.compareDefaults.compareMetrics);
+  }
+  if (appState.activeWorkspace === "data_overview") {
+    appState.compareField = "项目代号";
+    appState.countryMode = "multi_country";
+    appState.groupDimensions = ["首次访问日期"];
+    appState.compareMetrics = DATA_OVERVIEW_METRICS.slice();
+    appState.compareValues = (appState.filters["项目代号"] || []).filter((item) => item !== "全部");
   }
   if (appState.activeWorkspace === "paid_adgroup") {
     appState.compareField = "广告组";
@@ -5137,7 +5890,7 @@ function buildControlSection() {
 
   const versionControl = document.querySelector("[data-control='version-filter']");
   if (versionControl) {
-    versionControl.style.display = appState.analysisMode === "single_project" && !isPaidShareWorkspace ? "" : "none";
+    versionControl.style.display = isDataOverview || (appState.analysisMode === "single_project" && !isPaidShareWorkspace) ? "" : "none";
   }
   const compareValuesControl = document.querySelector("#compare-values")?.closest(".control-block");
   if (compareValuesControl) {
