@@ -110,7 +110,6 @@ const TIMING_SHORT_LABELS = {
 const WORKSPACES = {
   data_overview: {
     label: "数据概览",
-    hidden: true,
     note: "优先看 D0卸载率、D0通知授权率、D0通知展示率、D0通知点击率，快速定位问题更可能来自项目、日期、国家还是版本。",
     compareDefaults: {
       analysisMode: "cross_project",
@@ -267,7 +266,7 @@ const WORKSPACES = {
 };
 
 const appState = {
-  activeWorkspace: "paid_country",
+  activeWorkspace: "data_overview",
   analysisMode: "single_project",
   countryMode: "single_country",
   openSelectId: null,
