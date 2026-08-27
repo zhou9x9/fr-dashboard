@@ -34,6 +34,10 @@ RECOMMENDED_FUNNEL_METRICS = [
 ]
 
 
+def is_deprecated_d2_field(name: str) -> bool:
+    return "_D2" in name or name.startswith("D2")
+
+
 def metric_kind(name: str) -> str:
     if name == "新增用户数":
         return "count"
@@ -94,12 +98,16 @@ def read_csv_rows(path: Path, rename_map: dict[str, str] | None = None) -> tuple
         mapped_header = [rename_map.get(name, name) for name in original_header]
         header = []
         for name in mapped_header:
+            if is_deprecated_d2_field(name):
+                continue
             if name not in header:
                 header.append(name)
         rows = []
         for raw_row in reader:
             row = {}
             for original_name, normalized_name in zip(original_header, mapped_header):
+                if is_deprecated_d2_field(normalized_name):
+                    continue
                 value = parse_value(normalized_name, raw_row.get(original_name, ""))
                 if normalized_name not in row or (row[normalized_name] is None and value is not None):
                     row[normalized_name] = value
