@@ -59,6 +59,8 @@ const PLAYBACK_FILTER_FIELDS = ["报表日期", "项目代号", "首次访问日
 const EVENT_PARAMETER_DIMENSION_FIELDS = ["报表日期", "项目代号", "首次访问日期", "版本号", "国家", "事件名", "type"];
 const EVENT_PARAMETER_FILTER_FIELDS = [...EVENT_PARAMETER_DIMENSION_FIELDS, "api"];
 const ALL_FILTER_FIELDS = [...new Set([...DIMENSION_FIELDS, ...PLAYBACK_FILTER_FIELDS, ...EVENT_PARAMETER_FILTER_FIELDS])];
+const SINGLE_SELECT_FIELDS = ["项目代号"];
+const ALL_EXCLUSIVE_FIELDS = ["版本号", "type"];
 const OVERVIEW_FIXED_TYPE = "0";
 const OVERVIEW_MIN_NEW_USERS = 200;
 const RATE_METRICS = ["event_success_rate", "user_success_rate", "event_fail_rate", "user_fail_rate"].filter((metric) =>
@@ -169,6 +171,14 @@ const TYPE_EMPTY_LABEL = "未填写";
 
 function isStrictFilterField(field) {
   return field === "type";
+}
+
+function isSingleSelectField(field) {
+  return SINGLE_SELECT_FIELDS.includes(field);
+}
+
+function isAllExclusiveField(field) {
+  return ALL_EXCLUSIVE_FIELDS.includes(field);
 }
 
 function valueForField(row, field) {
@@ -319,7 +329,7 @@ function optionsForControl(config) {
   }
   if (config.key === "type") {
     return sortValues("type", [
-      ...new Set([...uniqueValues(dashboardData.rows || [], "type"), ...uniqueValues(eventParameterData.rows || [], "type")]),
+      ...new Set([...uniqueValues(dashboardData.rows || [], "type"), ...uniqueValues(eventParameterData.rows || [], "type"), ...uniqueValues(playbackData.rows || [], "type")]),
     ]);
   }
   return optionsFor(config.key, activeRows());
@@ -333,6 +343,48 @@ function selectedForControl(config) {
     return state.metrics;
   }
   return state.filters[config.key] || [];
+}
+
+function uniqueSelected(values, options) {
+  const allowed = new Set(options);
+  return values.filter((value, index) => allowed.has(value) && values.indexOf(value) === index);
+}
+
+function preferredAllValue(options) {
+  return options.find(isAllValue) || "";
+}
+
+function normalizeSelectedForControl(config, values, options, changedValue = null) {
+  const selected = uniqueSelected(values, options);
+  if (config.type !== "filter") {
+    return selected;
+  }
+
+  if (isSingleSelectField(config.key)) {
+    if (changedValue && selected.includes(changedValue)) {
+      return [changedValue];
+    }
+    if (selected.length) {
+      return [selected[selected.length - 1]];
+    }
+    return options.length ? [options[0]] : [];
+  }
+
+  if (isAllExclusiveField(config.key)) {
+    const allValue = preferredAllValue(options);
+    const specificValues = selected.filter((value) => !isAllValue(value));
+    if (changedValue && selected.includes(changedValue)) {
+      return isAllValue(changedValue) ? [changedValue] : specificValues;
+    }
+    if (!selected.length) {
+      return allValue ? [allValue] : [];
+    }
+    if (selected.some(isAllValue) && specificValues.length) {
+      return allValue ? [allValue] : specificValues;
+    }
+  }
+
+  return selected;
 }
 
 function setSelectedForControl(config, values) {
@@ -390,7 +442,7 @@ function initDefaults() {
   state.filters["国家"] = countries.includes("ALL") ? ["ALL"] : countries.slice(0, 1);
   state.filters["版本号"] = versions.includes("ALL") ? ["ALL"] : versions.slice(-1);
   state.filters["API"] = apis.slice(0, 1);
-  state.filters["type"] = types.slice();
+  state.filters["type"] = types.includes("ALL") ? ["ALL"] : types.slice(0, 1);
   state.filters["事件名"] = eventNames.slice(0, 1);
   state.filters["api"] = eventApis.slice();
   state.splitDimensions = ["首次访问日期", "type"].filter((field) => splitDimensionOptions().includes(field));
@@ -420,7 +472,7 @@ function renderControls() {
   const container = document.querySelector("#filters");
   container.innerHTML = activeControlConfigs().map((config) => {
     const options = optionsForControl(config);
-    const selected = selectedForControl(config).filter((value) => options.includes(value));
+    const selected = normalizeSelectedForControl(config, selectedForControl(config), options);
     setSelectedForControl(config, selected);
     const selectedCount =
       config.type === "filter" && !isStrictFilterField(config.key) && !selected.length ? options.length : selected.length;
@@ -1474,7 +1526,14 @@ function handleControlClick(event) {
   }
   const options = optionsForControl(config);
   rememberOpenSelectScroll();
-  setSelectedForControl(config, action.dataset.action === "select-all" ? options : []);
+  const actionName = action.dataset.action;
+  let nextValues = [];
+  if (actionName === "select-all") {
+    nextValues = isSingleSelectField(config.key) || isAllExclusiveField(config.key)
+      ? [preferredAllValue(options) || options[0]].filter(Boolean)
+      : options;
+  }
+  setSelectedForControl(config, normalizeSelectedForControl(config, nextValues, options));
   state.openControl = config.key;
   renderAll();
 }
@@ -1499,7 +1558,8 @@ function handleControlChange(event) {
       selected.splice(index, 1);
     }
   }
-  setSelectedForControl(config, selected);
+  const options = optionsForControl(config);
+  setSelectedForControl(config, normalizeSelectedForControl(config, selected, options, input.value));
   state.openControl = config.key;
   renderAll();
 }
