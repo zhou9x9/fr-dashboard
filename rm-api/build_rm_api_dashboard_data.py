@@ -106,6 +106,10 @@ def parse_count(raw: Any) -> int | None:
     value = str(raw or "").strip().replace(",", "")
     if not value:
         return None
+    try:
+        return int(round(float(value)))
+    except ValueError:
+        return None
 
 
 def parse_number(raw: Any) -> int | float | None:
@@ -119,10 +123,6 @@ def parse_number(raw: Any) -> int | float | None:
     except ValueError:
         return None
     return int(number) if number.is_integer() else round(number, 8)
-    try:
-        return int(round(float(value)))
-    except ValueError:
-        return None
 
 
 def parse_event_parameter_value(field: str, raw: Any) -> Any:
