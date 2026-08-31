@@ -882,6 +882,7 @@ function apiMetricTableHtml(rows) {
       <tr>
         <th>API</th>
         <th>新增用户数</th>
+        <th>request user</th>
         ${RATE_METRICS.map((metric) => `<th>${escapeHtml(metricLabel(metric))}</th>`).join("")}
       </tr>
     </thead>
@@ -893,6 +894,7 @@ function apiMetricTableHtml(rows) {
         <tr>
           <td class="api-cell">${escapeHtml(api)}</td>
           <td class="number-cell">${formatCount(sumField(apiRows, "new_users"))}</td>
+          <td class="number-cell">${formatCount(sumField(apiRows, "request_users"))}</td>
           ${RATE_METRICS.map((metric) => {
             const activeClass = state.metrics.includes(metric) ? " is-focused" : "";
             return `<td class="number-cell${activeClass}">${formatRate(aggregateMetric(metric, apiRows))}</td>`;
@@ -904,7 +906,7 @@ function apiMetricTableHtml(rows) {
 
   return {
     apiCount: apiOrder.length,
-    html: `<table>${header}<tbody>${body || `<tr><td colspan="${RATE_METRICS.length + 2}" class="empty-table">当前筛选下暂无数据</td></tr>`}</tbody></table>`,
+    html: `<table>${header}<tbody>${body || `<tr><td colspan="${RATE_METRICS.length + 3}" class="empty-table">当前筛选下暂无数据</td></tr>`}</tbody></table>`,
   };
 }
 
