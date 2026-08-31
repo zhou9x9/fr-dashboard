@@ -366,6 +366,86 @@
         white-space: nowrap;
       }
 
+      .overview-wrap {
+        display: grid;
+        gap: 14px;
+      }
+
+      .overview-card-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .overview-card {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        padding: 12px 14px;
+      }
+
+      .overview-card span {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .overview-card strong {
+        display: block;
+        margin-top: 6px;
+        font-size: 22px;
+        line-height: 1.2;
+      }
+
+      .overview-conclusion {
+        border: 1px solid var(--line);
+        border-left: 4px solid var(--accent);
+        border-radius: 8px;
+        background: #f8fbff;
+        padding: 14px 16px;
+      }
+
+      .overview-conclusion h3 {
+        margin: 0 0 8px;
+        font-size: 15px;
+      }
+
+      .overview-conclusion ul {
+        margin: 0;
+        padding-left: 18px;
+        color: var(--ink);
+        line-height: 1.75;
+        font-size: 13px;
+      }
+
+      .overview-section-title {
+        margin: 0 0 10px;
+        font-size: 15px;
+      }
+
+      .status-pill {
+        display: inline-block;
+        min-width: 52px;
+        border-radius: 999px;
+        padding: 3px 8px;
+        color: #fff;
+        font-size: 12px;
+        font-weight: 750;
+        text-align: center;
+      }
+
+      .status-pill.good {
+        background: var(--accent-2);
+      }
+
+      .status-pill.watch {
+        background: var(--accent-3);
+      }
+
+      .status-pill.risk {
+        background: var(--danger);
+      }
+
       .inner-table-wrap {
         padding: 0;
       }
@@ -461,6 +541,10 @@
         .control-grid {
           grid-template-columns: repeat(2, minmax(0, 1fr));
         }
+
+        .overview-card-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
       }
 
       @media (max-width: 640px) {
@@ -474,6 +558,10 @@
         }
 
         .control-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .overview-card-grid {
           grid-template-columns: 1fr;
         }
 
@@ -494,7 +582,9 @@
         <div>
           <h1>RM 数据看板</h1>
           <nav class="tabs" aria-label="RM 看板菜单">
-            <button class="tab active" type="button" data-menu="api" aria-current="page">API数据</button>
+            <button class="tab active" type="button" data-menu="api_overview" aria-current="page">api概况</button>
+            <button class="tab" type="button" data-menu="api" aria-current="false">API数据</button>
+            <button class="tab" type="button" data-menu="playback" aria-current="false">播放指标</button>
             <button class="tab" type="button" data-menu="event_parameter" aria-current="false">事件参数</button>
           </nav>
           <div class="meta-row">
@@ -526,7 +616,7 @@
 
         <section class="panel">
           <div class="panel-head">
-            <h2>明细数据</h2>
+            <h2 id="detail-title">API概况</h2>
             <div id="detail-count" class="panel-note">0 个 API</div>
           </div>
           <div class="table-wrap">
@@ -536,7 +626,7 @@
       </main>
     </div>
 
-    <script src="./data.js?v=202608311030"></script>
-    <script src="./app.js?v=202608311030"></script>
+    <script src="./data.js?v=202608311159"></script>
+    <script src="./app.js?v=202608311159"></script>
   </body>
 </html>

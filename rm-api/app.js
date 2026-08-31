@@ -20,6 +20,12 @@ const dashboardData = window.RM_API_DASHBOARD_DATA || {
     ],
     rows: [],
   },
+  playback: {
+    sourceFiles: [],
+    dimensions: ["报表日期", "项目代号", "首次访问日期", "国家", "版本号"],
+    metrics: [],
+    rows: [],
+  },
 };
 
 const eventParameterData = dashboardData.eventParameter || {
@@ -36,16 +42,45 @@ const eventParameterData = dashboardData.eventParameter || {
   ],
   rows: [],
 };
+const playbackData = dashboardData.playback || {
+  sourceFiles: [],
+  dimensions: ["报表日期", "项目代号", "首次访问日期", "国家", "版本号"],
+  metrics: [],
+  rows: [],
+};
 
+const MENU_OVERVIEW = "api_overview";
 const MENU_API = "api";
+const MENU_PLAYBACK = "playback";
 const MENU_EVENT_PARAMETER = "event_parameter";
 const DIMENSION_FIELDS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号", "API", "type"];
+const OVERVIEW_FILTER_FIELDS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号"];
+const PLAYBACK_FILTER_FIELDS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号"];
 const EVENT_PARAMETER_DIMENSION_FIELDS = ["报表日期", "项目代号", "首次访问日期", "版本号", "国家", "事件名", "type"];
 const EVENT_PARAMETER_FILTER_FIELDS = [...EVENT_PARAMETER_DIMENSION_FIELDS, "api"];
-const ALL_FILTER_FIELDS = [...new Set([...DIMENSION_FIELDS, ...EVENT_PARAMETER_FILTER_FIELDS])];
+const ALL_FILTER_FIELDS = [...new Set([...DIMENSION_FIELDS, ...PLAYBACK_FILTER_FIELDS, ...EVENT_PARAMETER_FILTER_FIELDS])];
+const OVERVIEW_FIXED_TYPE = "0";
+const OVERVIEW_MIN_NEW_USERS = 200;
 const RATE_METRICS = ["event_success_rate", "user_success_rate", "event_fail_rate", "user_fail_rate"].filter((metric) =>
   dashboardData.metrics.includes(metric)
 );
+const PLAYBACK_COUNT_FIELDS = [
+  "request_events",
+  "request_users",
+  "success_events",
+  "success_users",
+  "fail_events",
+  "fail_users",
+];
+const COUNT_FIELD_LABELS = {
+  new_users: "新增用户数",
+  request_events: "请求事件数",
+  request_users: "请求用户数",
+  success_events: "成功事件数",
+  success_users: "成功用户数",
+  fail_events: "失败事件数",
+  fail_users: "失败用户数",
+};
 const CHART_SPLIT_FIELDS = ["API", "国家", "版本号", "type"];
 const DETAIL_SPLIT_FIELDS = ["首次访问日期", "国家", "版本号", "type", "报表日期", "项目代号"];
 const API_CONTROL_CONFIGS = [
@@ -57,6 +92,22 @@ const API_CONTROL_CONFIGS = [
   { key: "API", label: "API", type: "filter", tall: true },
   { key: "type", label: "type", type: "filter" },
   { key: "splitDimensions", label: "拆分维度", type: "split" },
+  { key: "metrics", label: "关注指标", type: "metrics" },
+];
+const OVERVIEW_CONTROL_CONFIGS = [
+  { key: "报表日期", label: "报表日期", type: "filter" },
+  { key: "项目代号", label: "项目代号", type: "filter" },
+  { key: "首次访问日期", label: "首次访问日期", type: "filter", tall: true },
+  { key: "版本号", label: "版本号", type: "filter" },
+  { key: "国家", label: "国家", type: "filter" },
+  { key: "metrics", label: "关注指标", type: "metrics" },
+];
+const PLAYBACK_CONTROL_CONFIGS = [
+  { key: "报表日期", label: "报表日期", type: "filter" },
+  { key: "项目代号", label: "项目代号", type: "filter" },
+  { key: "首次访问日期", label: "首次访问日期", type: "filter", tall: true },
+  { key: "版本号", label: "版本号", type: "filter" },
+  { key: "国家", label: "国家", type: "filter" },
   { key: "metrics", label: "关注指标", type: "metrics" },
 ];
 const EVENT_PARAMETER_CONTROL_CONFIGS = [
@@ -94,7 +145,7 @@ const COLOR_PALETTE = [
 ];
 
 const state = {
-  activeMenu: MENU_API,
+  activeMenu: MENU_OVERVIEW,
   filters: Object.fromEntries(ALL_FILTER_FIELDS.map((field) => [field, []])),
   splitDimensions: [],
   metrics: [],
@@ -129,7 +180,13 @@ function valueForField(row, field) {
 }
 
 function activeData() {
-  return state.activeMenu === MENU_EVENT_PARAMETER ? eventParameterData : dashboardData;
+  if (state.activeMenu === MENU_EVENT_PARAMETER) {
+    return eventParameterData;
+  }
+  if (state.activeMenu === MENU_PLAYBACK) {
+    return playbackData;
+  }
+  return dashboardData;
 }
 
 function activeRows() {
@@ -137,10 +194,22 @@ function activeRows() {
 }
 
 function activeDimensionFields() {
+  if (state.activeMenu === MENU_OVERVIEW) {
+    return OVERVIEW_FILTER_FIELDS;
+  }
+  if (state.activeMenu === MENU_PLAYBACK) {
+    return PLAYBACK_FILTER_FIELDS.filter((field) => playbackData.dimensions.includes(field));
+  }
   return state.activeMenu === MENU_EVENT_PARAMETER ? EVENT_PARAMETER_FILTER_FIELDS : DIMENSION_FIELDS;
 }
 
 function activeControlConfigs() {
+  if (state.activeMenu === MENU_OVERVIEW) {
+    return OVERVIEW_CONTROL_CONFIGS;
+  }
+  if (state.activeMenu === MENU_PLAYBACK) {
+    return PLAYBACK_CONTROL_CONFIGS.filter((config) => config.type !== "filter" || playbackData.dimensions.includes(config.key));
+  }
   return state.activeMenu === MENU_EVENT_PARAMETER ? EVENT_PARAMETER_CONTROL_CONFIGS : API_CONTROL_CONFIGS;
 }
 
@@ -234,7 +303,8 @@ function optionsFor(field, rows = activeRows()) {
 }
 
 function metricLabel(metric) {
-  return dashboardData.metricMeta[metric]?.label || metric;
+  const playbackMetric = playbackData.metrics?.find((item) => item.key === metric);
+  return dashboardData.metricMeta[metric]?.label || playbackMetric?.label || COUNT_FIELD_LABELS[metric] || metric;
 }
 
 function optionsForControl(config) {
@@ -243,6 +313,9 @@ function optionsForControl(config) {
   }
   if (config.type === "metrics") {
     return RATE_METRICS;
+  }
+  if (state.activeMenu === MENU_OVERVIEW && config.key === "版本号") {
+    return sortValues("版本号", uniqueValues(activeRows(), "版本号"), activeRows());
   }
   if (config.key === "type") {
     return sortValues("type", [
@@ -298,6 +371,7 @@ function controlSummary(config, selected, options) {
 function initDefaults() {
   const apiRows = dashboardData.rows || [];
   const eventRows = eventParameterData.rows || [];
+  const playbackRows = playbackData.rows || [];
   const reportDates = optionsFor("报表日期", apiRows);
   const projects = optionsFor("项目代号", apiRows);
   const firstVisitDates = optionsFor("首次访问日期", apiRows);
@@ -306,7 +380,9 @@ function initDefaults() {
   const apis = optionsFor("API", apiRows);
   const eventNames = optionsFor("事件名", eventRows);
   const eventApis = optionsFor("api", eventRows);
-  const types = sortValues("type", [...new Set([...uniqueValues(apiRows, "type"), ...uniqueValues(eventRows, "type")])]);
+  const types = sortValues("type", [
+    ...new Set([...uniqueValues(apiRows, "type"), ...uniqueValues(eventRows, "type"), ...uniqueValues(playbackRows, "type")]),
+  ]);
 
   state.filters["报表日期"] = reportDates.slice(-1);
   state.filters["项目代号"] = projects.slice(0, 1);
@@ -482,6 +558,9 @@ function formatCount(value) {
 }
 
 function activeSplitDimensions(rows) {
+  const data = activeData();
+  const dimensions = data.dimensions || [];
+  const available = data.splitDimensions?.length ? data.splitDimensions : dimensions;
   const fields = new Set();
   CHART_SPLIT_FIELDS.forEach((field) => {
     if ((state.filters[field] || []).length > 1) {
@@ -489,8 +568,8 @@ function activeSplitDimensions(rows) {
     }
   });
   return [...fields].filter((field) => {
-    if (!dashboardData.splitDimensions.includes(field)) {
-      return dashboardData.dimensions.includes(field);
+    if (!available.includes(field)) {
+      return dimensions.includes(field);
     }
     return uniqueValues(rows, field).length > 1 || (state.filters[field] || []).length > 1;
   });
@@ -652,7 +731,7 @@ function renderChart(rows) {
     .join("");
 
   chartNode.innerHTML = `
-    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="RM API 指标趋势折线图">
+    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${state.activeMenu === MENU_PLAYBACK ? "RM 播放指标趋势折线图" : "RM API 指标趋势折线图"}">
       <rect x="0" y="0" width="${width}" height="${height}" class="chart-bg" />
       ${grid}
       <line x1="${margin.left}" y1="${height - margin.bottom}" x2="${width - margin.right}" y2="${height - margin.bottom}" class="axis-line" />
@@ -808,6 +887,77 @@ function renderDetailTable(rows) {
     : `${detailGroups.length} 个分组`;
 }
 
+function playbackCountFields(rows) {
+  return PLAYBACK_COUNT_FIELDS.filter((field) => rows.some((row) => Number.isFinite(Number(row[field]))));
+}
+
+function playbackRowsSorted(rows) {
+  return rows.slice().sort((a, b) => {
+    const dateDiff = String(b["首次访问日期"] || "").localeCompare(String(a["首次访问日期"] || ""), "zh-Hans-CN", { numeric: true });
+    if (dateDiff !== 0) {
+      return dateDiff;
+    }
+    const leftCountry = isAllValue(a["国家"]) ? "" : String(a["国家"] || "");
+    const rightCountry = isAllValue(b["国家"]) ? "" : String(b["国家"] || "");
+    const countryDiff = leftCountry.localeCompare(rightCountry, "zh-Hans-CN", { numeric: true });
+    if (countryDiff !== 0) {
+      return countryDiff;
+    }
+    return String(a["版本号"] || "").localeCompare(String(b["版本号"] || ""), "zh-Hans-CN", { numeric: true });
+  });
+}
+
+function renderPlaybackDetail(rows) {
+  const host = document.querySelector("#detail-table");
+  const countNode = document.querySelector("#detail-count");
+  const countFields = playbackCountFields(rows);
+  const rateMetrics = RATE_METRICS.filter((metric) => rows.some((row) => Number.isFinite(Number(row[metric]))));
+  const sortedRows = playbackRowsSorted(rows);
+  const visibleRows = sortedRows.slice(0, 1000);
+  const extraCount = sortedRows.length - visibleRows.length;
+  const context = ["项目代号", "国家", "版本号"].map(selectedTitlePart).join(" / ");
+  const headers = `
+    <th>首次访问日期</th>
+    <th>国家</th>
+    <th>版本号</th>
+    <th>新增用户数</th>
+    ${countFields.map((field) => `<th>${escapeHtml(metricLabel(field))}</th>`).join("")}
+    ${rateMetrics.map((metric) => `<th>${escapeHtml(metricLabel(metric))}</th>`).join("")}
+  `;
+  const body = visibleRows.map((row) => `
+    <tr>
+      <td>${escapeHtml(row["首次访问日期"] || "NA")}</td>
+      <td>${escapeHtml(row["国家"] || "NA")}</td>
+      <td>${escapeHtml(row["版本号"] || "NA")}</td>
+      <td class="number-cell">${formatCount(row.new_users)}</td>
+      ${countFields.map((field) => `<td class="number-cell">${formatCount(row[field])}</td>`).join("")}
+      ${rateMetrics.map((metric) => {
+        const activeClass = state.metrics.includes(metric) ? " is-focused" : "";
+        return `<td class="number-cell${activeClass}">${formatRate(row[metric])}</td>`;
+      }).join("")}
+    </tr>
+  `).join("");
+
+  host.innerHTML = `
+    <div class="detail-stack">
+      <article class="detail-group">
+        <div class="detail-group-head">
+          <h3>${escapeHtml(context)}</h3>
+          <span>${sortedRows.length.toLocaleString("zh-CN")} 条播放记录</span>
+        </div>
+        <div class="table-wrap inner-table-wrap">
+          <table>
+            <thead><tr>${headers}</tr></thead>
+            <tbody>${body || `<tr><td colspan="${rateMetrics.length + countFields.length + 4}" class="empty-table">当前筛选下暂无播放指标数据</td></tr>`}</tbody>
+          </table>
+        </div>
+      </article>
+      ${extraCount > 0 ? `<div class="empty-state compact">播放记录较多，已先显示前 1000 条，还有 ${extraCount} 条未展开。</div>` : ""}
+    </div>
+  `;
+  countNode.textContent = `${sortedRows.length.toLocaleString("zh-CN")} 条播放记录`;
+}
+
 function eventParameterFields() {
   return eventParameterData.parameterFields?.length
     ? eventParameterData.parameterFields
@@ -916,6 +1066,353 @@ function renderEventParameterDetail(rows) {
   countNode.textContent = `${items.length.toLocaleString("zh-CN")} 个参数值`;
 }
 
+function selectedSpecificValues(field) {
+  return (state.filters[field] || []).filter((value) => !isAllValue(value));
+}
+
+function overviewVersionValues() {
+  const selectedVersions = selectedSpecificValues("版本号");
+  if (selectedVersions.length) {
+    return selectedVersions;
+  }
+  return sortValues("版本号", uniqueValues(dashboardData.rows || [], "版本号"), dashboardData.rows || [])
+    .filter((value) => !isAllValue(value));
+}
+
+function matchesOverviewStaticFilters(row, versionValues = overviewVersionValues()) {
+  return valueForField(row, "type") === OVERVIEW_FIXED_TYPE
+    && ["报表日期", "项目代号"].every((field) => matchesFilter(row, field))
+    && versionValues.includes(row["版本号"]);
+}
+
+function overviewExcludedLatestDate(versionValues = overviewVersionValues()) {
+  const dates = uniqueValues((dashboardData.rows || []).filter((row) => matchesOverviewStaticFilters(row, versionValues)), "首次访问日期");
+  return sortValues("首次访问日期", dates).slice(-1)[0] || "";
+}
+
+function matchesOverviewBase(row, excludedLatestDate = overviewExcludedLatestDate(), versionValues = overviewVersionValues()) {
+  return matchesOverviewStaticFilters(row, versionValues)
+    && row["首次访问日期"] !== excludedLatestDate
+    && matchesFilter(row, "首次访问日期");
+}
+
+function overviewBaseRows() {
+  const versionValues = overviewVersionValues();
+  const excludedLatestDate = overviewExcludedLatestDate(versionValues);
+  return (dashboardData.rows || []).filter((row) => matchesOverviewBase(row, excludedLatestDate, versionValues));
+}
+
+function overviewScopeRows(baseRows, scope) {
+  if (scope === "all") {
+    return baseRows.filter((row) => isAllValue(row["国家"]));
+  }
+  const selectedCountries = selectedSpecificValues("国家");
+  return baseRows.filter((row) => {
+    const country = row["国家"];
+    if (!country || isAllValue(country)) {
+      return false;
+    }
+    return !selectedCountries.length || selectedCountries.includes(country);
+  });
+}
+
+function aggregateRows(rows) {
+  const summary = {
+    rows,
+    rowCount: rows.length,
+    newUsers: sumField(rows, "new_users"),
+    requestEvents: sumField(rows, "request_events"),
+    requestUsers: sumField(rows, "request_users"),
+    metrics: {},
+  };
+  RATE_METRICS.forEach((metric) => {
+    summary.metrics[metric] = aggregateMetric(metric, rows);
+  });
+  return summary;
+}
+
+function metricValue(summary, metric) {
+  return summary?.metrics?.[metric] ?? null;
+}
+
+function bucketRows(rows, fields) {
+  const map = new Map();
+  rows.forEach((row) => {
+    const values = fields.map((field) => valueForField(row, field) || "ALL");
+    const key = JSON.stringify(values);
+    if (!map.has(key)) {
+      map.set(key, { key, values, rows: [] });
+    }
+    map.get(key).rows.push(row);
+  });
+
+  const included = [];
+  const excluded = [];
+  map.forEach((bucket) => {
+    const summary = aggregateRows(bucket.rows);
+    const item = { ...bucket, summary };
+    if (summary.newUsers >= OVERVIEW_MIN_NEW_USERS) {
+      included.push(item);
+    } else {
+      excluded.push(item);
+    }
+  });
+  return { included, excluded };
+}
+
+function sortOverviewBuckets(rows, fields) {
+  return rows.sort((a, b) => {
+    const dateIndex = fields.indexOf("首次访问日期");
+    if (dateIndex >= 0) {
+      const dateDiff = String(b.values[dateIndex]).localeCompare(String(a.values[dateIndex]), "zh-Hans-CN", { numeric: true });
+      if (dateDiff !== 0) {
+        return dateDiff;
+      }
+    }
+    const failDiff = Number(metricValue(b.summary, "user_fail_rate") || 0) - Number(metricValue(a.summary, "user_fail_rate") || 0);
+    if (failDiff !== 0) {
+      return failDiff;
+    }
+    return b.summary.newUsers - a.summary.newUsers;
+  });
+}
+
+function sortOverviewApiBuckets(rows, fields) {
+  return rows.sort((a, b) => {
+    const countryIndex = fields.indexOf("国家");
+    if (countryIndex >= 0) {
+      const countryDiff = String(a.values[countryIndex]).localeCompare(String(b.values[countryIndex]), "zh-Hans-CN", { numeric: true });
+      if (countryDiff !== 0) {
+        return countryDiff;
+      }
+    }
+    const apiIndex = fields.indexOf("API");
+    if (apiIndex >= 0) {
+      const apiDiff = String(a.values[apiIndex]).localeCompare(String(b.values[apiIndex]), "zh-Hans-CN", { numeric: true });
+      if (apiDiff !== 0) {
+        return apiDiff;
+      }
+    }
+    const dateIndex = fields.indexOf("首次访问日期");
+    if (dateIndex >= 0) {
+      const dateDiff = String(b.values[dateIndex]).localeCompare(String(a.values[dateIndex]), "zh-Hans-CN", { numeric: true });
+      if (dateDiff !== 0) {
+        return dateDiff;
+      }
+    }
+    const versionIndex = fields.indexOf("版本号");
+    if (versionIndex >= 0) {
+      const versionDiff = String(a.values[versionIndex]).localeCompare(String(b.values[versionIndex]), "zh-Hans-CN", { numeric: true });
+      if (versionDiff !== 0) {
+        return versionDiff;
+      }
+    }
+    return Number(metricValue(b.summary, "user_fail_rate") || 0) - Number(metricValue(a.summary, "user_fail_rate") || 0);
+  });
+}
+
+function statusForRate(value) {
+  const rate = Number(value || 0);
+  if (rate >= 0.08) {
+    return { cls: "risk", label: "风险" };
+  }
+  if (rate >= 0.03) {
+    return { cls: "watch", label: "关注" };
+  }
+  return { cls: "good", label: "稳定" };
+}
+
+function statusPill(value) {
+  const status = statusForRate(value);
+  return `<span class="status-pill ${status.cls}">${status.label}</span>`;
+}
+
+function formatRateDelta(current, previous) {
+  if (!Number.isFinite(Number(current)) || !Number.isFinite(Number(previous))) {
+    return "NA";
+  }
+  const delta = Number(current) - Number(previous);
+  const sign = delta > 0 ? "+" : "";
+  return `${sign}${(delta * 100).toFixed(2)}pp`;
+}
+
+function overviewMetrics() {
+  return state.metrics.length ? state.metrics : RATE_METRICS;
+}
+
+function overviewCell(summary, metric) {
+  return `<td class="number-cell">${formatRate(metricValue(summary, metric))}</td>`;
+}
+
+function overviewMetricHeaders() {
+  return overviewMetrics().map((metric) => `<th>${escapeHtml(metricLabel(metric))}</th>`).join("");
+}
+
+function overviewMetricCells(summary) {
+  return overviewMetrics().map((metric) => overviewCell(summary, metric)).join("");
+}
+
+function overviewTable(headers, bodyRows, emptyColspan) {
+  return `
+    <div class="table-wrap inner-table-wrap">
+      <table>
+        <thead><tr>${headers}</tr></thead>
+        <tbody>${bodyRows || `<tr><td colspan="${emptyColspan}" class="empty-table">当前筛选下暂无有效数据</td></tr>`}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function buildOverviewAnalysis() {
+  const baseRows = overviewBaseRows();
+  const allRows = overviewScopeRows(baseRows, "all");
+  const countryRows = overviewScopeRows(baseRows, "country");
+  const comparisonFields = ["首次访问日期", "版本号", "API"];
+  const allByDate = bucketRows(allRows, ["首次访问日期"]);
+  const allApi = bucketRows(allRows, comparisonFields);
+  const countryNames = sortValues("国家", uniqueValues(countryRows, "国家"), countryRows);
+  const countryTables = countryNames.map((country) => {
+    const grouped = bucketRows(countryRows.filter((row) => row["国家"] === country), comparisonFields);
+    return {
+      country,
+      included: sortOverviewApiBuckets(grouped.included, comparisonFields),
+      excluded: grouped.excluded,
+    };
+  });
+  const latestDate = sortValues("首次访问日期", uniqueValues(baseRows, "首次访问日期")).slice(-1)[0] || "";
+  const excludedLatestDate = overviewExcludedLatestDate();
+  const countryApiIncluded = countryTables.flatMap((item) =>
+    item.included.map((bucket) => ({ ...bucket, country: item.country }))
+  );
+
+  return {
+    baseRows,
+    allRows,
+    countryRows,
+    latestDate,
+    excludedLatestDate,
+    allByDate,
+    allApi,
+    countryTables,
+    countryApiIncluded,
+    excludedCount: allApi.excluded.length + countryTables.reduce((sum, item) => sum + item.excluded.length, 0),
+  };
+}
+
+function overviewConclusionItems(analysis) {
+  const dateBuckets = sortOverviewBuckets(analysis.allByDate.included.map((item) => ({ ...item, fieldsDateIndex: 0 })), ["首次访问日期"]);
+  const latest = dateBuckets[0];
+  const previous = dateBuckets[1];
+  const allApiRisk = sortOverviewBuckets(
+    analysis.allApi.included.filter((item) => !analysis.latestDate || item.values[0] === analysis.latestDate),
+    ["首次访问日期", "版本号", "API"]
+  );
+  const countryApiRisk = sortOverviewBuckets(
+    analysis.countryApiIncluded
+      .filter((item) => !analysis.latestDate || item.values[0] === analysis.latestDate)
+      .map((item) => ({ ...item, values: [item.country, ...item.values] })),
+    ["国家", "首次访问日期", "版本号", "API"]
+  );
+  const worstAllApi = allApiRisk[0];
+  const worstCountryApi = countryApiRisk[0];
+  const items = [];
+
+  if (latest) {
+    const userFail = metricValue(latest.summary, "user_fail_rate");
+    const delta = previous ? formatRateDelta(userFail, metricValue(previous.summary, "user_fail_rate")) : "NA";
+    items.push(
+      `固定 type=${OVERVIEW_FIXED_TYPE}，已排除最新日期 ${analysis.excludedLatestDate || "NA"}；ALL国家最新有效日期 ${latest.values[0]} 的用户失败率为 ${formatRate(userFail)}，较上一有效日期 ${previous?.values?.[0] || "NA"} 变化 ${delta}。`
+    );
+  }
+  if (worstAllApi) {
+    items.push(
+      `ALL国家的 API 对比里，${worstAllApi.values[2]} / ${worstAllApi.values[1]} 当前用户失败率最高，为 ${formatRate(metricValue(worstAllApi.summary, "user_fail_rate"))}。`
+    );
+  }
+  if (worstCountryApi) {
+    items.push(
+      `具体国家里，${worstCountryApi.values[0]} 的 ${worstCountryApi.values[3]} / ${worstCountryApi.values[2]} 当前最需要关注，用户失败率 ${formatRate(metricValue(worstCountryApi.summary, "user_fail_rate"))}。`
+    );
+  }
+  items.push(`所有表格均按 日期 × 版本 × API 展开，并排除新增用户数少于 ${OVERVIEW_MIN_NEW_USERS} 的行；本次排除 ${analysis.excludedCount.toLocaleString("zh-CN")} 行。`);
+  return items.length ? items : ["当前筛选下暂无可形成结论的数据。"];
+}
+
+function renderOverview() {
+  const host = document.querySelector("#detail-table");
+  const countNode = document.querySelector("#detail-count");
+  const analysis = buildOverviewAnalysis();
+  const validAllApis = sortOverviewApiBuckets(analysis.allApi.included, ["首次访问日期", "版本号", "API"]);
+  const dates = uniqueValues(analysis.baseRows, "首次访问日期");
+  const versions = overviewVersionValues();
+  const countries = uniqueValues(analysis.countryRows, "国家");
+  const apiCount = uniqueValues(analysis.baseRows, "API").length;
+
+  const conclusion = overviewConclusionItems(analysis).map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+  const allHeaders = `
+    <th>API</th><th>日期</th><th>版本号</th><th>新增用户数</th>${overviewMetricHeaders()}<th>状态</th>
+  `;
+  const allRows = validAllApis.map((item) => `
+    <tr>
+      <td class="api-cell">${escapeHtml(item.values[2])}</td>
+      <td>${escapeHtml(item.values[0])}</td>
+      <td>${escapeHtml(item.values[1])}</td>
+      <td class="number-cell">${formatCount(item.summary.newUsers)}</td>
+      ${overviewMetricCells(item.summary)}
+      <td>${statusPill(metricValue(item.summary, "user_fail_rate"))}</td>
+    </tr>
+  `).join("");
+
+  const countryHeaders = `
+    <th>API</th><th>日期</th><th>版本号</th><th>新增用户数</th>${overviewMetricHeaders()}<th>状态</th>
+  `;
+  const countryTables = analysis.countryTables.map((table) => {
+    const countryRows = table.included.map((item) => `
+    <tr>
+      <td class="api-cell">${escapeHtml(item.values[2])}</td>
+      <td>${escapeHtml(item.values[0])}</td>
+      <td>${escapeHtml(item.values[1])}</td>
+      <td class="number-cell">${formatCount(item.summary.newUsers)}</td>
+      ${overviewMetricCells(item.summary)}
+      <td>${statusPill(metricValue(item.summary, "user_fail_rate"))}</td>
+    </tr>
+    `).join("");
+    return `
+      <article class="detail-group">
+        <div class="detail-group-head">
+          <h3>${escapeHtml(table.country)}：所有版本 / 所有 API 对比</h3>
+          <span>${table.included.length.toLocaleString("zh-CN")} 行 · 排除 ${table.excluded.length.toLocaleString("zh-CN")} 行</span>
+        </div>
+        ${overviewTable(countryHeaders, countryRows, overviewMetrics().length + 5)}
+      </article>
+    `;
+  }).join("");
+
+  host.innerHTML = `
+    <div class="overview-wrap">
+      <div class="overview-card-grid">
+        <div class="overview-card"><span>有效日期</span><strong>${dates.length.toLocaleString("zh-CN")}</strong></div>
+        <div class="overview-card"><span>具体版本</span><strong>${versions.length.toLocaleString("zh-CN")}</strong></div>
+        <div class="overview-card"><span>具体国家</span><strong>${countries.length.toLocaleString("zh-CN")}</strong></div>
+        <div class="overview-card"><span>API数量</span><strong>${apiCount.toLocaleString("zh-CN")}</strong></div>
+      </div>
+      <div class="overview-conclusion">
+        <h3>总结论</h3>
+        <ul>${conclusion}</ul>
+      </div>
+      <article class="detail-group">
+        <div class="detail-group-head">
+          <h3>ALL国家：所有版本 / 所有 API 对比</h3>
+          <span>type=${OVERVIEW_FIXED_TYPE} · 已排除最新日期 ${analysis.excludedLatestDate || "NA"}</span>
+        </div>
+        ${overviewTable(allHeaders, allRows, overviewMetrics().length + 5)}
+      </article>
+      ${countryTables || `<div class="empty-state compact">当前筛选下暂无具体国家有效数据</div>`}
+    </div>
+  `;
+  countNode.textContent = `type=${OVERVIEW_FIXED_TYPE} · ${analysis.baseRows.length.toLocaleString("zh-CN")} 行 · 排除最新日期 ${analysis.excludedLatestDate || "NA"} · 排除 ${analysis.excludedCount.toLocaleString("zh-CN")} 个低量行`;
+}
+
 function renderMeta() {
   const data = activeData();
   document.querySelector("#generated-at").textContent = dashboardData.generatedAt || "未生成";
@@ -926,13 +1423,27 @@ function renderMeta() {
 function renderAll() {
   renderMenu();
   renderControls();
-  const rows = filteredRows();
   const chartPanel = document.querySelector("#chart-panel");
-  if (state.activeMenu === MENU_EVENT_PARAMETER) {
+  const detailTitle = document.querySelector("#detail-title");
+  if (state.activeMenu === MENU_OVERVIEW) {
     chartPanel.hidden = true;
+    detailTitle.textContent = "API概况";
+    renderOverview();
+  } else if (state.activeMenu === MENU_PLAYBACK) {
+    const rows = filteredRows();
+    chartPanel.hidden = false;
+    detailTitle.textContent = "播放指标";
+    renderChart(rows);
+    renderPlaybackDetail(rows);
+  } else if (state.activeMenu === MENU_EVENT_PARAMETER) {
+    const rows = filteredRows();
+    chartPanel.hidden = true;
+    detailTitle.textContent = "明细数据";
     renderEventParameterDetail(rows);
   } else {
+    const rows = filteredRows();
     chartPanel.hidden = false;
+    detailTitle.textContent = "明细数据";
     renderChart(rows);
     renderDetailTable(rows);
   }
