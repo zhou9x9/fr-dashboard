@@ -145,7 +145,7 @@ const COLOR_PALETTE = [
 ];
 
 const state = {
-  activeMenu: MENU_OVERVIEW,
+  activeMenu: MENU_API,
   filters: Object.fromEntries(ALL_FILTER_FIELDS.map((field) => [field, []])),
   splitDimensions: [],
   metrics: [],
