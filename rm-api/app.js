@@ -233,13 +233,16 @@ function countryUserTotals(rows) {
   const totals = new Map();
   const bestRows = new Map();
 
-  dashboardData.rows.forEach((row) => {
+  rows.forEach((row) => {
     const country = row["国家"];
-    if (!country || isAllValue(country) || !isAllValue(row["版本号"])) {
+    const users = Number(row.new_users);
+    if (!country || isAllValue(country) || !Number.isFinite(users)) {
+      return;
+    }
+    if (row["版本号"] && !isAllValue(row["版本号"])) {
       return;
     }
     const key = [row["报表日期"], row["项目代号"], row["首次访问日期"], country].join("||");
-    const users = Number(row.new_users || 0);
     if (!bestRows.has(key) || users > bestRows.get(key)) {
       bestRows.set(key, users);
     }
