@@ -59,7 +59,7 @@ const PLAYBACK_FILTER_FIELDS = ["报表日期", "项目代号", "首次访问日
 const EVENT_PARAMETER_DIMENSION_FIELDS = ["报表日期", "项目代号", "首次访问日期", "版本号", "国家", "事件名", "type"];
 const EVENT_PARAMETER_FILTER_FIELDS = [...EVENT_PARAMETER_DIMENSION_FIELDS, "api"];
 const ALL_FILTER_FIELDS = [...new Set([...DIMENSION_FIELDS, ...PLAYBACK_FILTER_FIELDS, ...EVENT_PARAMETER_FILTER_FIELDS])];
-const SINGLE_SELECT_FIELDS = ["项目代号"];
+const SINGLE_SELECT_FIELDS = [];
 const ALL_EXCLUSIVE_FIELDS = ["版本号", "type"];
 const OVERVIEW_FIXED_TYPE = "0";
 const OVERVIEW_MIN_NEW_USERS = 200;
@@ -437,7 +437,7 @@ function initDefaults() {
   ]);
 
   state.filters["报表日期"] = reportDates.slice(-1);
-  state.filters["项目代号"] = projects.slice(0, 1);
+  state.filters["项目代号"] = projects.slice();
   state.filters["首次访问日期"] = firstVisitDates.slice(-5);
   state.filters["国家"] = countries.includes("ALL") ? ["ALL"] : countries.slice(0, 1);
   state.filters["版本号"] = versions.includes("ALL") ? ["ALL"] : versions.slice(-1);
