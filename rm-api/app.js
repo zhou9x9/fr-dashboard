@@ -1477,28 +1477,21 @@ function renderMeta() {
 function renderAll() {
   renderMenu();
   renderControls();
-  const chartPanel = document.querySelector("#chart-panel");
   const detailTitle = document.querySelector("#detail-title");
   if (state.activeMenu === MENU_OVERVIEW) {
-    chartPanel.hidden = true;
     detailTitle.textContent = "API概况";
     renderOverview();
   } else if (state.activeMenu === MENU_PLAYBACK) {
     const rows = filteredRows();
-    chartPanel.hidden = false;
     detailTitle.textContent = "播放指标";
-    renderChart(rows);
     renderPlaybackDetail(rows);
   } else if (state.activeMenu === MENU_EVENT_PARAMETER) {
     const rows = filteredRows();
-    chartPanel.hidden = true;
     detailTitle.textContent = "明细数据";
     renderEventParameterDetail(rows);
   } else {
     const rows = filteredRows();
-    chartPanel.hidden = false;
     detailTitle.textContent = "明细数据";
-    renderChart(rows);
     renderDetailTable(rows);
   }
   renderMeta();
