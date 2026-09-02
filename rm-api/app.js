@@ -312,6 +312,33 @@ function optionsFor(field, rows = activeRows()) {
   return sortValues(field, values, rows);
 }
 
+function effectiveProjectValues(rows = activeRows()) {
+  const projects = optionsFor("项目代号", rows);
+  const selectedProjects = (state.filters["项目代号"] || []).filter((project) => projects.includes(project));
+  return selectedProjects.length ? selectedProjects : projects;
+}
+
+function projectScopedRows(rows = activeRows()) {
+  const projects = effectiveProjectValues(rows);
+  return projects.length
+    ? rows.filter((row) => projects.includes(valueForField(row, "项目代号")))
+    : rows;
+}
+
+function countryOptionsForSelectedProjects(rows = activeRows()) {
+  const projects = effectiveProjectValues(rows);
+  if (!projects.length) {
+    return optionsFor("国家", rows);
+  }
+
+  const countrySets = projects.map((project) => {
+    const projectRows = rows.filter((row) => valueForField(row, "项目代号") === project);
+    return new Set(uniqueValues(projectRows, "国家"));
+  });
+  const commonCountries = [...countrySets[0]].filter((country) => countrySets.every((set) => set.has(country)));
+  return sortValues("国家", commonCountries, projectScopedRows(rows));
+}
+
 function metricLabel(metric) {
   const playbackMetric = playbackData.metrics?.find((item) => item.key === metric);
   return dashboardData.metricMeta[metric]?.label || playbackMetric?.label || COUNT_FIELD_LABELS[metric] || metric;
@@ -323,6 +350,9 @@ function optionsForControl(config) {
   }
   if (config.type === "metrics") {
     return RATE_METRICS;
+  }
+  if (config.key === "国家") {
+    return countryOptionsForSelectedProjects(activeRows());
   }
   if (state.activeMenu === MENU_OVERVIEW && config.key === "版本号") {
     return sortValues("版本号", uniqueValues(activeRows(), "版本号"), activeRows());
@@ -537,30 +567,38 @@ function restoreOpenSelectScroll(container = document) {
   }
 }
 
-function matchesFilter(row, field) {
+function matchesFilter(row, field, context = {}) {
   const selected = state.filters[field] || [];
   if (isStrictFilterField(field) && !selected.length) {
     return false;
   }
+  if (field === "国家" && !selected.length && context.allowedCountries) {
+    return context.allowedCountries.has(valueForField(row, field));
+  }
   return !selected.length || selected.includes(valueForField(row, field));
 }
 
-function matchesEventParameterFilter(row, field) {
+function matchesEventParameterFilter(row, field, context = {}) {
   if (field === "api") {
     const value = row[field];
     if (value === null || value === undefined || String(value).trim() === "") {
       return true;
     }
   }
-  return matchesFilter(row, field);
+  return matchesFilter(row, field, context);
 }
 
 function filteredRows() {
   const fields = activeDimensionFields();
-  if (state.activeMenu === MENU_EVENT_PARAMETER) {
-    return activeRows().filter((row) => fields.every((field) => matchesEventParameterFilter(row, field)));
+  const rows = activeRows();
+  const context = {};
+  if (fields.includes("国家") && !(state.filters["国家"] || []).length) {
+    context.allowedCountries = new Set(countryOptionsForSelectedProjects(rows));
   }
-  return activeRows().filter((row) => fields.every((field) => matchesFilter(row, field)));
+  if (state.activeMenu === MENU_EVENT_PARAMETER) {
+    return rows.filter((row) => fields.every((field) => matchesEventParameterFilter(row, field, context)));
+  }
+  return rows.filter((row) => fields.every((field) => matchesFilter(row, field, context)));
 }
 
 function sumField(rows, field) {
