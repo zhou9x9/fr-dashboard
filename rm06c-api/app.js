@@ -314,10 +314,10 @@ function initDefaults() {
   state.filters["国家"] = countries.includes("ALL") ? ["ALL"] : countries.slice(0, 1);
   state.filters["版本号"] = versions.includes("ALL") ? ["ALL"] : versions.slice(-1);
   state.filters["API"] = apis.slice(0, 1);
-  state.filters["type"] = types.slice();
+  state.filters["type"] = types.includes("ALL") ? ["ALL"] : types.slice(0, 1);
   state.filters["事件名"] = eventNames.slice(0, 1);
   state.filters["api"] = eventApis.slice();
-  state.splitDimensions = ["首次访问日期", "type"].filter((field) => splitDimensionOptions().includes(field));
+  state.splitDimensions = ["首次访问日期"].filter((field) => splitDimensionOptions().includes(field));
   state.metrics = RATE_METRICS.slice();
 }
 
@@ -929,13 +929,9 @@ function renderAll() {
   renderMenu();
   renderControls();
   const rows = filteredRows();
-  const chartPanel = document.querySelector("#chart-panel");
   if (state.activeMenu === MENU_EVENT_PARAMETER) {
-    chartPanel.hidden = true;
     renderEventParameterDetail(rows);
   } else {
-    chartPanel.hidden = false;
-    renderChart(rows);
     renderDetailTable(rows);
   }
   renderMeta();
