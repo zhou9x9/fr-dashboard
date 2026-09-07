@@ -237,6 +237,42 @@ function metricLabel(metric) {
   return dashboardData.metricMeta[metric]?.label || metric;
 }
 
+function activeFilterFieldsByControlOrder() {
+  return activeControlConfigs()
+    .filter((config) => config.type === "filter")
+    .map((config) => config.key);
+}
+
+function priorFilterFieldsForControl(config) {
+  const fields = [];
+  for (const control of activeControlConfigs()) {
+    if (control.key === config.key) {
+      break;
+    }
+    if (control.type === "filter") {
+      fields.push(control.key);
+    }
+  }
+  return fields;
+}
+
+function filterRowsBySelectedFields(rows, fields) {
+  return fields.reduce(
+    (scopedRows, field) =>
+      scopedRows.filter((row) =>
+        state.activeMenu === MENU_EVENT_PARAMETER
+          ? matchesEventParameterFilter(row, field)
+          : matchesFilter(row, field)
+      ),
+    rows
+  );
+}
+
+function rowsForControlOptions(config) {
+  const fields = priorFilterFieldsForControl(config);
+  return fields.length ? filterRowsBySelectedFields(activeRows(), fields) : activeRows();
+}
+
 function optionsForControl(config) {
   if (config.type === "split") {
     return splitDimensionOptions();
@@ -244,12 +280,11 @@ function optionsForControl(config) {
   if (config.type === "metrics") {
     return RATE_METRICS;
   }
+  const rows = rowsForControlOptions(config);
   if (config.key === "type") {
-    return sortValues("type", [
-      ...new Set([...uniqueValues(dashboardData.rows || [], "type"), ...uniqueValues(eventParameterData.rows || [], "type")]),
-    ]);
+    return optionsFor("type", rows);
   }
-  return optionsFor(config.key, activeRows());
+  return optionsFor(config.key, rows);
 }
 
 function selectedForControl(config) {
@@ -323,9 +358,10 @@ function initDefaults() {
 
 function splitDimensionOptions() {
   const available = dashboardData.splitDimensions?.length ? dashboardData.splitDimensions : DETAIL_SPLIT_FIELDS;
+  const rows = rowsForControlOptions({ key: "splitDimensions" });
   return DETAIL_SPLIT_FIELDS
     .filter((field) => available.includes(field) && dashboardData.dimensions.includes(field))
-    .filter((field) => optionsFor(field, dashboardData.rows || []).length > 1);
+    .filter((field) => optionsFor(field, rows).length > 1);
 }
 
 function selectedSet(config) {
@@ -428,11 +464,7 @@ function matchesEventParameterFilter(row, field) {
 }
 
 function filteredRows() {
-  const fields = activeDimensionFields();
-  if (state.activeMenu === MENU_EVENT_PARAMETER) {
-    return activeRows().filter((row) => fields.every((field) => matchesEventParameterFilter(row, field)));
-  }
-  return activeRows().filter((row) => fields.every((field) => matchesFilter(row, field)));
+  return filterRowsBySelectedFields(activeRows(), activeFilterFieldsByControlOrder());
 }
 
 function sumField(rows, field) {

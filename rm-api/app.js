@@ -347,6 +347,46 @@ function metricLabel(metric) {
   return dashboardData.metricMeta[metric]?.label || playbackMetric?.label || COUNT_FIELD_LABELS[metric] || metric;
 }
 
+function activeFilterFieldsByControlOrder() {
+  return activeControlConfigs()
+    .filter((config) => config.type === "filter")
+    .map((config) => config.key);
+}
+
+function priorFilterFieldsForControl(config) {
+  const fields = [];
+  for (const control of activeControlConfigs()) {
+    if (control.key === config.key) {
+      break;
+    }
+    if (control.type === "filter") {
+      fields.push(control.key);
+    }
+  }
+  return fields;
+}
+
+function filterRowsBySelectedFields(rows, fields) {
+  return fields.reduce((scopedRows, field) => {
+    if (field === "国家" && !(state.filters["国家"] || []).length) {
+      const allowedCountries = new Set(countryOptionsForSelectedProjects(scopedRows));
+      return allowedCountries.size
+        ? scopedRows.filter((row) => allowedCountries.has(valueForField(row, field)))
+        : scopedRows;
+    }
+    return scopedRows.filter((row) =>
+      state.activeMenu === MENU_EVENT_PARAMETER
+        ? matchesEventParameterFilter(row, field)
+        : matchesFilter(row, field)
+    );
+  }, rows);
+}
+
+function rowsForControlOptions(config) {
+  const fields = priorFilterFieldsForControl(config);
+  return fields.length ? filterRowsBySelectedFields(activeRows(), fields) : activeRows();
+}
+
 function optionsForControl(config) {
   if (config.type === "split") {
     return splitDimensionOptions();
@@ -354,18 +394,17 @@ function optionsForControl(config) {
   if (config.type === "metrics") {
     return RATE_METRICS;
   }
+  const rows = rowsForControlOptions(config);
   if (config.key === "国家") {
-    return countryOptionsForSelectedProjects(activeRows());
+    return countryOptionsForSelectedProjects(rows);
   }
   if (state.activeMenu === MENU_OVERVIEW && config.key === "版本号") {
-    return sortValues("版本号", uniqueValues(activeRows(), "版本号"), activeRows());
+    return sortValues("版本号", uniqueValues(rows, "版本号"), rows);
   }
   if (config.key === "type") {
-    return sortValues("type", [
-      ...new Set([...uniqueValues(dashboardData.rows || [], "type"), ...uniqueValues(eventParameterData.rows || [], "type"), ...uniqueValues(playbackData.rows || [], "type")]),
-    ]);
+    return optionsFor("type", rows);
   }
-  return optionsFor(config.key, activeRows());
+  return optionsFor(config.key, rows);
 }
 
 function selectedForControl(config) {
@@ -484,9 +523,10 @@ function initDefaults() {
 
 function splitDimensionOptions() {
   const available = dashboardData.splitDimensions?.length ? dashboardData.splitDimensions : DETAIL_SPLIT_FIELDS;
+  const rows = rowsForControlOptions({ key: "splitDimensions" });
   return DETAIL_SPLIT_FIELDS
     .filter((field) => available.includes(field) && dashboardData.dimensions.includes(field))
-    .filter((field) => optionsFor(field, dashboardData.rows || []).length > 1);
+    .filter((field) => optionsFor(field, rows).length > 1);
 }
 
 function selectedSet(config) {
@@ -592,16 +632,7 @@ function matchesEventParameterFilter(row, field, context = {}) {
 }
 
 function filteredRows() {
-  const fields = activeDimensionFields();
-  const rows = activeRows();
-  const context = {};
-  if (fields.includes("国家") && !(state.filters["国家"] || []).length) {
-    context.allowedCountries = new Set(countryOptionsForSelectedProjects(rows));
-  }
-  if (state.activeMenu === MENU_EVENT_PARAMETER) {
-    return rows.filter((row) => fields.every((field) => matchesEventParameterFilter(row, field, context)));
-  }
-  return rows.filter((row) => fields.every((field) => matchesFilter(row, field, context)));
+  return filterRowsBySelectedFields(activeRows(), activeFilterFieldsByControlOrder());
 }
 
 function sumField(rows, field) {
