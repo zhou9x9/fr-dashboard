@@ -280,25 +280,48 @@ def playback_row_key(row: dict[str, Any], fields: list[str]) -> tuple[Any, ...]:
     return tuple(row.get(field) for field in fields)
 
 
-def collect_csv_paths(input_dir: Path, pattern: str, include_history: bool = False) -> list[Path]:
+def latest_path_key(path: Path) -> tuple[str, float, str]:
+    return (report_date_from_path(path) or "", path.stat().st_mtime, path.name)
+
+
+def collect_csv_paths(
+    input_dir: Path,
+    pattern: str,
+    include_history: bool = False,
+    recent_report_days: int | None = None,
+) -> list[Path]:
     if input_dir.is_file():
         return [input_dir]
     paths = sorted(path for path in input_dir.rglob(pattern) if path.is_file())
-    if include_history or not paths:
+    if not paths:
+        return paths
+    if recent_report_days and recent_report_days > 0:
+        latest_by_project_date: dict[tuple[str, str], Path] = {}
+        for path in paths:
+            report_date = report_date_from_path(path)
+            if not report_date:
+                continue
+            project_code = project_code_from_path(path) or "__unknown__"
+            key = (project_code, report_date)
+            current = latest_by_project_date.get(key)
+            if current is None or latest_path_key(path) > latest_path_key(current):
+                latest_by_project_date[key] = path
+        latest_dates = sorted({report_date for _, report_date in latest_by_project_date}, reverse=True)[:recent_report_days]
+        return sorted(
+            [
+                path
+                for (_, report_date), path in latest_by_project_date.items()
+                if report_date in latest_dates
+            ],
+            key=lambda path: (project_code_from_path(path) or "", report_date_from_path(path) or "", path.name),
+        )
+    if include_history:
         return paths
     latest_by_project: dict[str, Path] = {}
     for path in paths:
         project_code = project_code_from_path(path) or "__unknown__"
         current = latest_by_project.get(project_code)
-        if current is None or (
-            report_date_from_path(path) or "",
-            path.stat().st_mtime,
-            path.name,
-        ) > (
-            report_date_from_path(current) or "",
-            current.stat().st_mtime,
-            current.name,
-        ):
+        if current is None or latest_path_key(path) > latest_path_key(current):
             latest_by_project[project_code] = path
     return sorted(latest_by_project.values(), key=lambda path: (project_code_from_path(path) or "", path.name))
 
@@ -448,16 +471,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--playback-glob", default=DEFAULT_PLAYBACK_GLOB, help="Playback CSV glob.")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT, help="Generated data.js path.")
     parser.add_argument("--include-history", action="store_true", help="Read all matched historical attachments.")
+    parser.add_argument("--recent-report-days", type=int, default=None, help="Read latest files for the most recent N report dates.")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    csv_paths = collect_csv_paths(args.input_dir, args.glob, args.include_history)
+    csv_paths = collect_csv_paths(args.input_dir, args.glob, args.include_history, args.recent_report_days)
     if not csv_paths:
         raise FileNotFoundError(f"No CSV files matched {args.glob!r} under {args.input_dir}")
-    event_parameter_paths = collect_csv_paths(args.input_dir, args.event_parameter_glob, args.include_history)
-    playback_paths = collect_csv_paths(args.input_dir, args.playback_glob, args.include_history)
+    event_parameter_paths = collect_csv_paths(
+        args.input_dir,
+        args.event_parameter_glob,
+        args.include_history,
+        args.recent_report_days,
+    )
+    playback_paths = collect_csv_paths(args.input_dir, args.playback_glob, args.include_history, args.recent_report_days)
 
     payload = build_payload(csv_paths)
     payload["eventParameter"] = build_event_parameter_payload(event_parameter_paths) if event_parameter_paths else {
