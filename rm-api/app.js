@@ -28,7 +28,24 @@ const dashboardData = window.RM_API_DASHBOARD_DATA || {
   },
 };
 
-const eventParameterData = dashboardData.eventParameter || {
+function expandRows(rows, fields) {
+  if (!Array.isArray(rows) || !rows.length || !Array.isArray(rows[0]) || !Array.isArray(fields) || !fields.length) {
+    return rows || [];
+  }
+  return rows.map((values) => Object.fromEntries(fields.map((field, index) => [field, values[index] ?? null])));
+}
+
+function normalizePayloadRows(payload) {
+  if (!payload || typeof payload !== "object") {
+    return payload;
+  }
+  payload.rows = expandRows(payload.rows || [], payload.rowFields || []);
+  return payload;
+}
+
+normalizePayloadRows(dashboardData);
+
+const eventParameterData = normalizePayloadRows(dashboardData.eventParameter || {
   sourceFiles: [],
   dimensions: ["报表日期", "项目代号", "首次访问日期", "版本号", "国家", "事件名", "type"],
   parameterFields: [
@@ -41,13 +58,13 @@ const eventParameterData = dashboardData.eventParameter || {
     { key: "total_users", label: "用户数", kind: "count" },
   ],
   rows: [],
-};
-const playbackData = dashboardData.playback || {
+});
+const playbackData = normalizePayloadRows(dashboardData.playback || {
   sourceFiles: [],
   dimensions: ["报表日期", "项目代号", "首次访问日期", "国家", "版本号"],
   metrics: [],
   rows: [],
-};
+});
 
 const MENU_OVERVIEW = "api_overview";
 const MENU_API = "api";

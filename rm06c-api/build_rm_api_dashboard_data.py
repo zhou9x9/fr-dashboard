@@ -64,7 +64,7 @@ EVENT_PARAMETER_COLUMN_RENAME = {
     "event_name": "事件名",
 }
 
-COUNT_COLUMNS = {
+COUNT_FIELDS = [
     "new_users",
     "request_events",
     "request_users",
@@ -72,7 +72,8 @@ COUNT_COLUMNS = {
     "success_users",
     "fail_events",
     "fail_users",
-}
+]
+COUNT_COLUMNS = set(COUNT_FIELDS)
 EVENT_PARAMETER_COUNT_COLUMNS = {"event_count", "total_users"}
 PLAYBACK_COLUMN_RENAME = {
     **COLUMN_RENAME,
@@ -280,6 +281,10 @@ def playback_row_key(row: dict[str, Any], fields: list[str]) -> tuple[Any, ...]:
     return tuple(row.get(field) for field in fields)
 
 
+def compact_rows(rows: list[dict[str, Any]], fields: list[str]) -> list[list[Any]]:
+    return [[row.get(field) for field in fields] for row in rows]
+
+
 def latest_path_key(path: Path) -> tuple[str, float, str]:
     return (report_date_from_path(path) or "", path.stat().st_mtime, path.name)
 
@@ -289,13 +294,15 @@ def collect_csv_paths(
     pattern: str,
     include_history: bool = False,
     recent_report_days: int | None = None,
+    include_report_dates: set[str] | None = None,
 ) -> list[Path]:
     if input_dir.is_file():
         return [input_dir]
     paths = sorted(path for path in input_dir.rglob(pattern) if path.is_file())
     if not paths:
         return paths
-    if recent_report_days and recent_report_days > 0:
+    include_report_dates = include_report_dates or set()
+    if (recent_report_days and recent_report_days > 0) or include_report_dates:
         latest_by_project_date: dict[tuple[str, str], Path] = {}
         for path in paths:
             report_date = report_date_from_path(path)
@@ -306,12 +313,16 @@ def collect_csv_paths(
             current = latest_by_project_date.get(key)
             if current is None or latest_path_key(path) > latest_path_key(current):
                 latest_by_project_date[key] = path
-        latest_dates = sorted({report_date for _, report_date in latest_by_project_date}, reverse=True)[:recent_report_days]
+        selected_dates = set(include_report_dates)
+        if recent_report_days and recent_report_days > 0:
+            selected_dates.update(
+                sorted({report_date for _, report_date in latest_by_project_date}, reverse=True)[:recent_report_days]
+            )
         return sorted(
             [
                 path
                 for (_, report_date), path in latest_by_project_date.items()
-                if report_date in latest_dates
+                if report_date in selected_dates
             ],
             key=lambda path: (project_code_from_path(path) or "", report_date_from_path(path) or "", path.name),
         )
@@ -329,6 +340,7 @@ def collect_csv_paths(
 def build_payload(csv_paths: list[Path]) -> dict[str, Any]:
     deduped: dict[tuple[Any, ...], dict[str, Any]] = {}
     source_files: list[str] = []
+    row_fields = DIMENSIONS + COUNT_FIELDS + METRICS
 
     for path in csv_paths:
         source_files.append(str(path))
@@ -357,13 +369,18 @@ def build_payload(csv_paths: list[Path]) -> dict[str, Any]:
         "splitDimensions": SPLIT_DIMENSIONS,
         "metrics": METRICS,
         "metricMeta": METRIC_META,
-        "rows": rows,
+        "rowFields": row_fields,
+        "rows": compact_rows(rows, row_fields),
     }
 
 
 def build_event_parameter_payload(csv_paths: list[Path]) -> dict[str, Any]:
     deduped: dict[tuple[Any, ...], dict[str, Any]] = {}
     source_files: list[str] = []
+    row_fields = EVENT_PARAMETER_DIMENSIONS + [item["key"] for item in EVENT_PARAMETER_FIELDS] + [
+        "event_count",
+        "total_users",
+    ]
 
     for path in csv_paths:
         source_files.append(str(path))
@@ -394,7 +411,8 @@ def build_event_parameter_payload(csv_paths: list[Path]) -> dict[str, Any]:
             {"key": "event_count", "label": "事件数", "kind": "count"},
             {"key": "total_users", "label": "用户数", "kind": "count"},
         ],
-        "rows": rows,
+        "rowFields": row_fields,
+        "rows": compact_rows(rows, row_fields),
     }
 
 
@@ -459,7 +477,8 @@ def build_playback_payload(csv_paths: list[Path]) -> dict[str, Any]:
             {"key": field, "label": field, "kind": playback_metric_kind(field)}
             for field in metric_fields
         ],
-        "rows": rows,
+        "rowFields": all_fields,
+        "rows": compact_rows(rows, all_fields),
     }
 
 
@@ -472,12 +491,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT, help="Generated data.js path.")
     parser.add_argument("--include-history", action="store_true", help="Read all matched historical attachments.")
     parser.add_argument("--recent-report-days", type=int, default=None, help="Read latest files for the most recent N report dates.")
+    parser.add_argument("--include-report-dates", default="", help="Comma-separated report dates to always include.")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    csv_paths = collect_csv_paths(args.input_dir, args.glob, args.include_history, args.recent_report_days)
+    include_report_dates = {item.strip() for item in args.include_report_dates.split(",") if item.strip()}
+    csv_paths = collect_csv_paths(
+        args.input_dir,
+        args.glob,
+        args.include_history,
+        args.recent_report_days,
+        include_report_dates,
+    )
     if not csv_paths:
         raise FileNotFoundError(f"No CSV files matched {args.glob!r} under {args.input_dir}")
     event_parameter_paths = collect_csv_paths(
@@ -485,8 +512,15 @@ def main() -> None:
         args.event_parameter_glob,
         args.include_history,
         args.recent_report_days,
+        include_report_dates,
     )
-    playback_paths = collect_csv_paths(args.input_dir, args.playback_glob, args.include_history, args.recent_report_days)
+    playback_paths = collect_csv_paths(
+        args.input_dir,
+        args.playback_glob,
+        args.include_history,
+        args.recent_report_days,
+        include_report_dates,
+    )
 
     payload = build_payload(csv_paths)
     payload["eventParameter"] = build_event_parameter_payload(event_parameter_paths) if event_parameter_paths else {
