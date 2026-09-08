@@ -295,6 +295,7 @@ def collect_csv_paths(
     include_history: bool = False,
     recent_report_days: int | None = None,
     include_report_dates: set[str] | None = None,
+    project_recent_report_days: dict[str, int] | None = None,
 ) -> list[Path]:
     if input_dir.is_file():
         return [input_dir]
@@ -302,7 +303,12 @@ def collect_csv_paths(
     if not paths:
         return paths
     include_report_dates = include_report_dates or set()
-    if (recent_report_days and recent_report_days > 0) or include_report_dates:
+    project_recent_report_days = {
+        project.upper(): days
+        for project, days in (project_recent_report_days or {}).items()
+        if days > 0
+    }
+    if (recent_report_days and recent_report_days > 0) or include_report_dates or project_recent_report_days:
         latest_by_project_date: dict[tuple[str, str], Path] = {}
         for path in paths:
             report_date = report_date_from_path(path)
@@ -313,16 +319,48 @@ def collect_csv_paths(
             current = latest_by_project_date.get(key)
             if current is None or latest_path_key(path) > latest_path_key(current):
                 latest_by_project_date[key] = path
-        selected_dates = set(include_report_dates)
-        if recent_report_days and recent_report_days > 0:
-            selected_dates.update(
-                sorted({report_date for _, report_date in latest_by_project_date}, reverse=True)[:recent_report_days]
+
+        selected_keys: set[tuple[str, str]] = set()
+        latest_by_project: dict[str, tuple[str, str]] = {}
+        for key, path in latest_by_project_date.items():
+            project_code, _ = key
+            current_key = latest_by_project.get(project_code)
+            current_path = latest_by_project_date[current_key] if current_key else None
+            if current_path is None or latest_path_key(path) > latest_path_key(current_path):
+                latest_by_project[project_code] = key
+        selected_keys.update(latest_by_project.values())
+
+        if include_report_dates:
+            selected_keys.update(
+                key
+                for key in latest_by_project_date
+                if key[1] in include_report_dates
             )
+
+        if recent_report_days and recent_report_days > 0:
+            selected_dates = sorted({report_date for _, report_date in latest_by_project_date}, reverse=True)[:recent_report_days]
+            selected_keys.update(
+                key
+                for key in latest_by_project_date
+                if key[1] in selected_dates
+            )
+
+        for project_code, days in project_recent_report_days.items():
+            project_dates = sorted(
+                {report_date for project, report_date in latest_by_project_date if project == project_code},
+                reverse=True,
+            )[:days]
+            selected_keys.update(
+                (project_code, report_date)
+                for report_date in project_dates
+                if (project_code, report_date) in latest_by_project_date
+            )
+
         return sorted(
             [
                 path
-                for (_, report_date), path in latest_by_project_date.items()
-                if report_date in selected_dates
+                for key, path in latest_by_project_date.items()
+                if key in selected_keys
             ],
             key=lambda path: (project_code_from_path(path) or "", report_date_from_path(path) or "", path.name),
         )
@@ -492,18 +530,34 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--include-history", action="store_true", help="Read all matched historical attachments.")
     parser.add_argument("--recent-report-days", type=int, default=None, help="Read latest files for the most recent N report dates.")
     parser.add_argument("--include-report-dates", default="", help="Comma-separated report dates to always include.")
+    parser.add_argument("--project-recent-report-days", default="", help="Comma-separated project:days rules, such as RM09B:5.")
     return parser.parse_args()
+
+
+def parse_project_recent_report_days(value: str) -> dict[str, int]:
+    result: dict[str, int] = {}
+    for item in value.split(","):
+        text = item.strip()
+        if not text:
+            continue
+        project, sep, days = text.partition(":")
+        if not sep:
+            raise ValueError(f"Invalid project recent report days rule: {text!r}")
+        result[project.strip().upper()] = int(days.strip())
+    return result
 
 
 def main() -> None:
     args = parse_args()
     include_report_dates = {item.strip() for item in args.include_report_dates.split(",") if item.strip()}
+    project_recent_report_days = parse_project_recent_report_days(args.project_recent_report_days)
     csv_paths = collect_csv_paths(
         args.input_dir,
         args.glob,
         args.include_history,
         args.recent_report_days,
         include_report_dates,
+        project_recent_report_days,
     )
     if not csv_paths:
         raise FileNotFoundError(f"No CSV files matched {args.glob!r} under {args.input_dir}")
@@ -513,6 +567,7 @@ def main() -> None:
         args.include_history,
         args.recent_report_days,
         include_report_dates,
+        project_recent_report_days,
     )
     playback_paths = collect_csv_paths(
         args.input_dir,
@@ -520,6 +575,7 @@ def main() -> None:
         args.include_history,
         args.recent_report_days,
         include_report_dates,
+        project_recent_report_days,
     )
 
     payload = build_payload(csv_paths)
