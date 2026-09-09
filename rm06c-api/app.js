@@ -13,6 +13,8 @@ const dashboardData = window.RM_API_DASHBOARD_DATA || {
       { key: "api", label: "API" },
       { key: "reason", label: "reason" },
       { key: "message", label: "message" },
+      { key: "status", label: "status" },
+      { key: "detail", label: "detail" },
     ],
     metrics: [
       { key: "event_count", label: "事件数", kind: "count" },
@@ -46,6 +48,8 @@ const eventParameterData = normalizePayloadRows(dashboardData.eventParameter || 
     { key: "api", label: "API" },
     { key: "reason", label: "reason" },
     { key: "message", label: "message" },
+    { key: "status", label: "status" },
+    { key: "detail", label: "detail" },
   ],
   metrics: [
     { key: "event_count", label: "事件数", kind: "count" },
@@ -94,6 +98,20 @@ const FIELD_SHORT_LABELS = {
   版本号: "版本",
   API: "API",
   type: "type",
+};
+const EVENT_PARAMETER_FIELD_LABELS = {
+  api: "API",
+  reason: "reason",
+  message: "message",
+  status: "status",
+  type: "type",
+  detail: "detail",
+};
+const EVENT_PARAMETER_FIELD_BY_EVENT = {
+  ytdisfail: ["api", "reason"],
+  dns_lookup: ["message"],
+  global_request: ["status"],
+  player_failed_count: ["type", "reason", "detail"],
 };
 const COLOR_PALETTE = [
   "#2563eb",
@@ -860,17 +878,43 @@ function renderDetailTable(rows) {
 }
 
 function eventParameterFields() {
-  return eventParameterData.parameterFields?.length
+  const configuredFields = eventParameterData.parameterFields?.length
     ? eventParameterData.parameterFields
     : [
         { key: "api", label: "API" },
         { key: "reason", label: "reason" },
         { key: "message", label: "message" },
+        { key: "status", label: "status" },
+        { key: "detail", label: "detail" },
       ];
+  const fields = new Map(configuredFields.map((field) => [field.key, field]));
+  Object.entries(EVENT_PARAMETER_FIELD_LABELS).forEach(([key, label]) => {
+    if (!fields.has(key)) {
+      fields.set(key, { key, label });
+    }
+  });
+  return [...fields.values()];
 }
 
 function activeEventParameterFields(rows) {
-  return eventParameterFields().filter((field) =>
+  const fields = eventParameterFields();
+  const fieldMap = new Map(fields.map((field) => [field.key, field]));
+  const fallbackKeys = (eventParameterData.parameterFields?.length
+    ? eventParameterData.parameterFields
+    : fields
+  ).map((field) => field.key);
+  const eventNames = [...new Set(rows.map((row) => String(row["事件名"] ?? "").trim()).filter(Boolean))];
+  const keys = [];
+  const addKey = (key) => {
+    if (!keys.includes(key)) {
+      keys.push(key);
+    }
+  };
+  (eventNames.length ? eventNames : [""]).forEach((eventName) => {
+    const eventKeys = EVENT_PARAMETER_FIELD_BY_EVENT[eventName] || fallbackKeys;
+    eventKeys.forEach(addKey);
+  });
+  return keys.map((key) => fieldMap.get(key) || { key, label: EVENT_PARAMETER_FIELD_LABELS[key] || key }).filter((field) =>
     rows.some((row) => {
       const value = row[field.key];
       return value !== null && value !== undefined && String(value).trim() !== "";

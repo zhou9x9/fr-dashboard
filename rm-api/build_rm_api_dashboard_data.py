@@ -23,6 +23,8 @@ EVENT_PARAMETER_FIELDS = [
     {"key": "api", "label": "API"},
     {"key": "reason", "label": "reason"},
     {"key": "message", "label": "message"},
+    {"key": "status", "label": "status"},
+    {"key": "detail", "label": "detail"},
 ]
 
 METRIC_META = {
@@ -438,6 +440,8 @@ def build_event_parameter_payload(csv_paths: list[Path]) -> dict[str, Any]:
             str(row.get("api") or ""),
             str(row.get("reason") or ""),
             str(row.get("message") or ""),
+            str(row.get("status") or ""),
+            str(row.get("detail") or ""),
         ),
     )
 
