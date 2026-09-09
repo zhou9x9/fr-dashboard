@@ -146,7 +146,8 @@ function escapeHtml(value) {
 }
 
 function isAllValue(value) {
-  return value === "ALL" || value === "全部";
+  const text = String(value ?? "").trim();
+  return text.toUpperCase() === "ALL" || text === "全部";
 }
 
 const TYPE_EMPTY_LABEL = "未填写";
@@ -922,6 +923,10 @@ function activeEventParameterFields(rows) {
   );
 }
 
+function isAllEventParameterItem(item) {
+  return item.values.length > 0 && item.values.every(isAllValue);
+}
+
 function buildEventParameterItems(rows, parameterFields) {
   const groups = new Map();
   rows.forEach((row) => {
@@ -941,6 +946,10 @@ function buildEventParameterItems(rows, parameterFields) {
     item.totalUsers += Number(row.total_users || 0);
   });
   return [...groups.values()].sort((a, b) => {
+    const allDiff = Number(isAllEventParameterItem(b)) - Number(isAllEventParameterItem(a));
+    if (allDiff !== 0) {
+      return allDiff;
+    }
     const eventDiff = b.eventCount - a.eventCount;
     if (eventDiff !== 0) {
       return eventDiff;
