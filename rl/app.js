@@ -5448,11 +5448,45 @@ function rerender() {
   renderTiming();
 }
 
+function formatMissingProjectSummary(missingByProject) {
+  const projectCodes = Object.keys(missingByProject || {}).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  return projectCodes.map((project) => {
+    const tables = missingByProject[project] || [];
+    return tables.length ? `${project}（${tables.join("、")}）` : project;
+  }).join("、");
+}
+
+function renderDataMeta() {
+  const meta = document.querySelector("#data-meta");
+  if (!meta) return;
+
+  meta.textContent = "";
+  const timeText = document.createElement("span");
+  timeText.textContent = `最近更新时间：${dashboardData.generatedAt}`;
+  meta.appendChild(timeText);
+
+  const syncStatus = dashboardData.syncStatus || {};
+  const missingText = formatMissingProjectSummary(syncStatus.missingByProject);
+  if (missingText) {
+    const missingBadge = document.createElement("span");
+    missingBadge.className = "meta-status warning";
+    missingBadge.textContent = `未更新项目：${missingText}`;
+    meta.appendChild(missingBadge);
+    return;
+  }
+
+  if (Array.isArray(syncStatus.expectedProjects) && syncStatus.expectedProjects.length) {
+    const okBadge = document.createElement("span");
+    okBadge.className = "meta-status ok";
+    okBadge.textContent = "全部项目已更新";
+    meta.appendChild(okBadge);
+  }
+}
+
 function bootstrap() {
   ensureDefaults();
   applyWorkspaceDefaults(appState.activeWorkspace);
-  document.querySelector("#data-meta").textContent =
-    `最近更新时间：${dashboardData.generatedAt}`;
+  renderDataMeta();
   document.addEventListener("click", (event) => {
     if (!event.target.closest(".multi-select-shell")) {
       document.querySelectorAll(".multi-select-shell.open").forEach((node) => node.classList.remove("open"));

@@ -160,7 +160,12 @@ def fill_timing_conversion_rates(header: list[str], rows: list[dict]) -> tuple[l
     return header, rows
 
 
-def build_payload(common_csv_path: Path, timing_csv_path: Path, feature_csv_path: Path | None = None):
+def build_payload(
+    common_csv_path: Path,
+    timing_csv_path: Path,
+    feature_csv_path: Path | None = None,
+    sync_status: dict | None = None,
+):
     main_header, main_rows = read_csv_rows(common_csv_path, rename_map=METRIC_RENAME_MAP)
     if "广告组" not in main_header:
         insert_at = main_header.index("版本号") if "版本号" in main_header else len(MAIN_DIMENSIONS) - 1
@@ -192,6 +197,7 @@ def build_payload(common_csv_path: Path, timing_csv_path: Path, feature_csv_path
     return {
         "generatedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "workbookPath": f"{common_csv_path.name} | {timing_csv_path.name}",
+        "syncStatus": sync_status or {},
         "main": {
             "dimensions": MAIN_DIMENSIONS,
             "metrics": main_metrics,
@@ -238,12 +244,18 @@ def parse_args():
         default=OUTPUT_PATH,
         help="Path to the generated data.js file.",
     )
+    parser.add_argument(
+        "--sync-status",
+        default=None,
+        help="JSON metadata describing expected, included, and missing projects for this refresh.",
+    )
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
-    payload = build_payload(args.common, args.timing, args.feature)
+    sync_status = json.loads(args.sync_status) if args.sync_status else None
+    payload = build_payload(args.common, args.timing, args.feature, sync_status)
     timing_payload = payload.pop("timing")
     feature_payload = payload.pop("feature")
     args.output.write_text(

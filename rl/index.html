@@ -91,12 +91,34 @@
       .meta {
         margin-top: 16px;
         display: inline-flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
         padding: 10px 14px;
         border-radius: 999px;
         background: rgba(36, 120, 149, 0.08);
         color: var(--muted);
         font-size: 13px;
         font-weight: 700;
+      }
+
+      .meta-status {
+        display: inline-flex;
+        align-items: center;
+        padding: 3px 9px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .meta-status.ok {
+        background: rgba(47, 158, 143, 0.12);
+        color: var(--accent-2);
+      }
+
+      .meta-status.warning {
+        background: rgba(214, 137, 77, 0.16);
+        color: #9a5a1f;
       }
 
       .hero-side .mini-title {
