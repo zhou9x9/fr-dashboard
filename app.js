@@ -39,7 +39,7 @@ function isAllowedCompareMetric(metric) {
   if (!dayMatches) {
     return true;
   }
-  return dayMatches.every((token) => ["D0", "D1", "D2"].includes(token.toUpperCase()));
+  return dayMatches.every((token) => ["D0", "D1"].includes(token.toUpperCase()));
 }
 
 const COMPARE_METRICS = dashboardData.main.metrics.filter(isAllowedCompareMetric);
@@ -58,6 +58,19 @@ const DATA_OVERVIEW_METRICS = [
   "通知展示率_D0",
   "通知点击率_D0",
 ].filter((metric) => COMPARE_METRICS.includes(metric));
+const AI_ANALYSIS_DIRECTIONS = [
+  { key: "overall", label: "整体指标", note: "先看新旧版本整体变好/变差" },
+  { key: "country", label: "头部国家", note: "看买量大的国家是否拖累" },
+  { key: "notification", label: "通知/文案/时机", note: "看通知链路和专项表现" },
+  { key: "feature", label: "功能模块", note: "看功能漏斗和模块点击" },
+  { key: "d1", label: "D1变化", note: "重点看 D1 相关指标" },
+  { key: "cause", label: "原因排查", note: "输出可能原因和优化建议" },
+];
+const AI_DEFAULT_ANALYSIS_DIRECTIONS = AI_ANALYSIS_DIRECTIONS.map((item) => item.key);
+const LOCAL_AI_MODEL = "qwen3:0.6b";
+const LOCAL_AI_ENDPOINT = "http://127.0.0.1:11434/api/chat";
+const DEEPSEEK_AI_MODEL = "deepseek-v4-flash";
+const DEEPSEEK_AI_ENDPOINT = "https://api.deepseek.com/chat/completions";
 const OVERVIEW_FIRST_LAUNCH_METRIC = "首页到达率_D0";
 const OVERVIEW_HEALTH_SECTIONS = [
   {
@@ -109,9 +122,8 @@ const TIMING_SHORT_LABELS = {
 };
 const WORKSPACES = {
   data_overview: {
-    label: "数据概览",
-    hidden: true,
-    note: "优先看 D0卸载率、D0通知授权率、D0通知展示率、D0通知点击率，快速定位问题更可能来自项目、日期、国家还是版本。",
+    label: "AI分析助手",
+    note: "输入项目、新旧版本和迭代内容，自动查看版本指标变化、重点国家差异和下一步分析建议。",
     compareDefaults: {
       analysisMode: "cross_project",
       compareField: "项目代号",
@@ -267,7 +279,7 @@ const WORKSPACES = {
 };
 
 const appState = {
-  activeWorkspace: "paid_country",
+  activeWorkspace: "data_overview",
   analysisMode: "single_project",
   countryMode: "single_country",
   openSelectId: null,
@@ -315,6 +327,21 @@ const appState = {
   lastTimingWorkspace: null,
   hasInitializedPaidCountryProjects: false,
   countryOptTrendMetric: null,
+  aiProject: "",
+  aiOldVersion: "",
+  aiNewVersion: "",
+  aiDates: [],
+  aiCountry: "",
+  aiFeatureAnalysisType: "",
+  aiIterationText: "",
+  aiDirections: AI_DEFAULT_ANALYSIS_DIRECTIONS.slice(),
+  aiLocalStatus: "idle",
+  aiLocalAnswer: "",
+  aiLocalError: "",
+  aiLocalRequestKey: "",
+  aiAnalysisMode: "deepseek",
+  aiDeepSeekApiKey: "",
+  aiHasGenerated: false,
   workspaceMemory: {},
   sharedProjectDate: {
     single: { project: [], firstVisitDate: [] },
@@ -1349,11 +1376,12 @@ function renderWorkspaceChrome() {
   const showFeature = isFeatureWorkspace();
   const showTiming = isTimingWorkspace();
   const showCompare = !showTiming && !showFeature;
+  const showCompareControls = showCompare && appState.activeWorkspace !== "data_overview";
   const showFunnel = false;
   const showStructure = appState.activeWorkspace === "cross_project";
   const showCompareDetails = showCompare && !["data_overview", "paid_country", "paid_adgroup"].includes(appState.activeWorkspace);
 
-  setHidden(sections.compareControls, !showCompare);
+  setHidden(sections.compareControls, !showCompareControls);
   setHidden(sections.compareSummary, !showCompare);
   setHidden(sections.compareDetails, !showCompareDetails);
   setHidden(sections.funnelControls, !showFunnel);
@@ -1378,11 +1406,11 @@ function renderWorkspaceChrome() {
   const featureDesc = document.querySelector("#feature-desc");
 
   if (appState.activeWorkspace === "data_overview") {
-    compareControlsTitle.textContent = "数据概览控制台";
-    summaryTitle.textContent = "数据问题定位";
-    summaryDesc.textContent = "从 D0卸载率开始，依次检查授权、展示和点击，快速判断差距主要出在哪个维度。";
-    detailsTitle.textContent = "数据概览明细";
-    detailsDesc.textContent = "当前菜单以诊断卡片为主，普通明细表暂不展示。";
+    compareControlsTitle.textContent = "AI分析助手控制台";
+    summaryTitle.textContent = "AI数据分析助手";
+    summaryDesc.textContent = "可以问项目间数据差距，也可以问单项目新旧版本迭代效果。";
+    detailsTitle.textContent = "AI分析明细";
+    detailsDesc.textContent = "当前菜单以问答分析为主，普通明细表暂不展示。";
   } else if (appState.activeWorkspace === "paid_country") {
     compareControlsTitle.textContent = "买量国家对比控制台";
     summaryTitle.textContent = "买量国家对比速览";
@@ -2648,93 +2676,3037 @@ function renderOverviewVersionComparison(overview) {
   `;
 }
 
-function renderDataOverviewSummary(host) {
-  const overview = computeDataOverview();
-  if (!overview.projects.length || !overview.currentDates.length) {
-    host.innerHTML = `<div class="empty-state">当前筛选下没有可用于数据概览的项目或日期。请确认报表日期与首次访问日期。</div>`;
-    return;
+function aiAvailableProjects() {
+  return optionsFor("项目代号").filter((value) => value !== "全部");
+}
+
+function aiLatestReportDate() {
+  return optionsFor("报表日期").slice(-1)[0] || "";
+}
+
+function aiProjectRows(project) {
+  const reportDate = aiLatestReportDate();
+  return dashboardData.main.rows.filter((row) =>
+    row["项目代号"] === project && (!reportDate || row["报表日期"] === reportDate)
+  );
+}
+
+function aiVersionOptions(project) {
+  return sortDimensionValues(
+    "版本号",
+    uniqueValues(aiProjectRows(project), "版本号").filter((value) => value !== "全部")
+  );
+}
+
+function aiDateOptions(project, oldVersion, newVersion) {
+  const versions = [oldVersion, newVersion].filter(Boolean);
+  const rows = aiProjectRows(project).filter((row) =>
+    !versions.length || versions.includes(row["版本号"])
+  );
+  return sortDimensionValues("首次访问日期", uniqueValues(rows, "首次访问日期"));
+}
+
+function aiDefaultDateSelection(dates) {
+  const orderedDates = (dates || []).slice();
+  return orderedDates.length > 1 ? orderedDates.slice(0, -1).slice(-5) : [];
+}
+
+function ensureAiAssistantDefaults() {
+  const projects = aiAvailableProjects();
+  if (!projects.includes(appState.aiProject)) {
+    appState.aiProject = projects.includes("FR07") ? "FR07" : projects[0] || "";
   }
-  const topRisk = overview.abnormalRanking[0];
-  const topIssue = topRisk?.diagnosis;
-  const periodText = `当前期 ${overview.currentDates.join(" / ")}；对比期 ${overview.previousDates.join(" / ") || "暂无可比周期"}`;
-  const kpiCards = overview.kpiSummary.map((item) => `
-    <article class="stat-card">
-      <div class="eyebrow">${item.weight}★ 健康模块</div>
-      <div class="stat-title">${item.label}</div>
-      <div class="stat-value">${overviewStatusLabel(item.status)}</div>
-      <div class="muted">风险 ${item.riskCount} 个项目 / 观察 ${item.watchCount} 个项目</div>
-    </article>
+  const versions = aiVersionOptions(appState.aiProject);
+  if (!versions.includes(appState.aiOldVersion) || !versions.includes(appState.aiNewVersion) || appState.aiOldVersion === appState.aiNewVersion) {
+    appState.aiOldVersion = versions.length >= 2 ? versions[versions.length - 2] : versions[0] || "";
+    appState.aiNewVersion = versions.length >= 2 ? versions[versions.length - 1] : versions[1] || versions[0] || "";
+  }
+  const dates = aiDateOptions(appState.aiProject, appState.aiOldVersion, appState.aiNewVersion);
+  const selectedDates = (appState.aiDates || []).filter((date) => dates.includes(date));
+  appState.aiDates = selectedDates.length ? selectedDates : aiDefaultDateSelection(dates);
+}
+
+function aiMetricMatchesFocusedDay(metric, day) {
+  if (!day) return false;
+  return metric === `${day}留存率` || metric.endsWith(`_${day}`) || metric.startsWith(`${day}`);
+}
+
+function aiFocusedDayMetrics(days) {
+  const focusedDays = days || [];
+  if (!focusedDays.length) return [];
+  return sortCompareMetrics(COMPARE_METRICS.filter((metric) =>
+    focusedDays.some((day) => aiMetricMatchesFocusedDay(metric, day))
+  ));
+}
+
+function aiNormalizeText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[\s_/\-｜|,，.。:：;；()（）【】\[\]"“”'‘’]/g, "");
+}
+
+function aiTextIncludes(rawText, value) {
+  const needle = aiNormalizeText(value);
+  return needle.length >= 2 && aiNormalizeText(rawText).includes(needle);
+}
+
+function aiMetricAliases(metric) {
+  const aliases = [metric, String(metric).replace(/_/g, ""), String(metric).replace(/_D\d+$/i, "")];
+  if (metric === "D1留存率") aliases.push("D1留存", "次日留存");
+  if (metric === "D3留存率") aliases.push("D3留存", "三日留存");
+  if (metric.includes("卸载率")) aliases.push("卸载", "卸载率");
+  if (metric.includes("通知授权率")) aliases.push("授权", "授权率", "通知授权");
+  if (metric.includes("通知展示率")) aliases.push("展示率", "通知展示");
+  if (metric.includes("通知点击率")) aliases.push("点击率", "通知点击");
+  if (metric.includes("人均展示次数")) aliases.push("展示次数", "人均展示");
+  if (metric.includes("人均点击次数")) aliases.push("点击次数", "人均点击");
+  if (metric.includes("常驻通知栏")) aliases.push("常驻通知栏", "常驻");
+  return uniqueArray(aliases);
+}
+
+function aiMatchedMetrics(rawText) {
+  if (!String(rawText || "").trim()) return [];
+  return sortCompareMetrics((dashboardData.main.metrics || []).filter((metric) =>
+    aiMetricAliases(metric).some((alias) => aiTextIncludes(rawText, alias))
+  ));
+}
+
+function aiDimensionAliases(dimension) {
+  const aliases = {
+    "报表日期": ["报表日期", "报告日期", "数据日期"],
+    "项目代号": ["项目代号", "项目", "包名"],
+    "首次访问日期": ["首次访问日期", "访问日期", "日期", "cohort"],
+    "国家": ["国家", "地区"],
+    "广告组": ["广告组", "素材组", "买量组"],
+    "版本号": ["版本号", "版本"],
+  };
+  return uniqueArray([dimension].concat(aliases[dimension] || []));
+}
+
+function aiMatchedDimensions(rawText) {
+  if (!String(rawText || "").trim()) return [];
+  return (dashboardData.main.dimensions || []).filter((dimension) =>
+    aiDimensionAliases(dimension).some((alias) => aiTextIncludes(rawText, alias))
+  );
+}
+
+function aiMatchedDimensionValues(rawText) {
+  if (!String(rawText || "").trim()) return [];
+  const values = [];
+  const cache = window.__frAiDimensionValueOptions || (window.__frAiDimensionValueOptions = {});
+  (dashboardData.main.dimensions || []).forEach((field) => {
+    const fieldValues = cache[field] || (cache[field] = optionsForRows(dashboardData.main.rows, field)
+      .filter((value) => value && value !== "全部" && value !== "(not set)")
+    );
+    fieldValues.forEach((value) => {
+      if (aiTextIncludes(rawText, value)) {
+        values.push({ field, value });
+      }
+    });
+  });
+  const countryAliases = {
+    印度: "India",
+    美国: "United States",
+    墨西哥: "Mexico",
+    巴基斯坦: "Pakistan",
+    孟加拉: "Bangladesh",
+    孟加拉国: "Bangladesh",
+    印尼: "Indonesia",
+    印度尼西亚: "Indonesia",
+    菲律宾: "Philippines",
+    埃及: "Egypt",
+    哥伦比亚: "Colombia",
+    秘鲁: "Peru",
+    阿根廷: "Argentina",
+    肯尼亚: "Kenya",
+    尼日利亚: "Nigeria",
+    突尼斯: "Tunisia",
+  };
+  const countryOptions = cache["国家"] || (cache["国家"] = optionsForRows(dashboardData.main.rows, "国家")
+    .filter((value) => value && value !== "全部" && value !== "(not set)")
+  );
+  Object.entries(countryAliases).forEach(([alias, value]) => {
+    if (countryOptions.includes(value) && aiTextIncludes(rawText, alias)) {
+      values.push({ field: "国家", value });
+    }
+  });
+  return uniqueArray(values.map((item) => `${item.field}|${item.value}`))
+    .map((key) => {
+      const [field, ...rest] = key.split("|");
+      return { field, value: rest.join("|") };
+    })
+    .slice(0, 20);
+}
+
+function aiMetricList(intent) {
+  const baseMetrics = [
+    "新增用户数",
+    "D1留存率",
+    "D3留存率",
+    "卸载率_D0",
+    "通知授权率_D0",
+    "通知展示率_D0",
+    "人均展示次数_D0",
+    "通知点击率_D0",
+    "人均点击次数_D0",
+    "常驻通知栏点击率_D0",
+    "常驻通知栏人均点击次数_D0",
+  ].filter((metric) => COMPARE_METRICS.includes(metric));
+  const focusedMetrics = aiFocusedDayMetrics(intent?.focusDays || []);
+  if (intent?.strictDayFocus && focusedMetrics.length) {
+    return uniqueArray(["新增用户数"].concat(intent?.focusMetrics || [], focusedMetrics))
+      .filter((metric) => metric === "新增用户数" || focusedMetrics.includes(metric))
+      .filter((metric) => COMPARE_METRICS.includes(metric));
+  }
+  return uniqueArray(["新增用户数"].concat(intent?.focusMetrics || [], focusedMetrics, baseMetrics))
+    .filter((metric) => COMPARE_METRICS.includes(metric));
+}
+
+function aiMetricIsLowerBetter(metric) {
+  return metric.includes("卸载率");
+}
+
+function aiRowsForVersion(project, version, dates, country = "全部") {
+  const reportDate = aiLatestReportDate();
+  let rows = dashboardData.main.rows.filter((row) =>
+    row["项目代号"] === project &&
+    row["版本号"] === version &&
+    dates.includes(row["首次访问日期"]) &&
+    (!reportDate || row["报表日期"] === reportDate) &&
+    (!country || row["国家"] === country)
+  );
+  if (rows.some((row) => row["广告组"] === "全部")) {
+    rows = rows.filter((row) => row["广告组"] === "全部");
+  }
+  return rows;
+}
+
+function aiAggregateVersion(project, version, dates, country = "全部", metrics = aiMetricList()) {
+  const rows = aiRowsForVersion(project, version, dates, country);
+  return {
+    rows,
+    aggregated: rows.length ? aggregateRows(rows, metrics) : null,
+  };
+}
+
+function aiMentionedProjects(rawText) {
+  return aiAvailableProjects().filter((project) => aiTextIncludes(rawText, project));
+}
+
+function aiMentionedVersions(rawText, project) {
+  const versions = project ? aiVersionOptions(project) : [];
+  const normalizedText = aiNormalizeText(rawText);
+  return versions.filter((version) => {
+    const normalizedVersion = aiNormalizeText(version);
+    return normalizedVersion && normalizedText.includes(normalizedVersion);
+  });
+}
+
+const AI_COUNTRY_ALIASES = [
+  { value: "United States", aliases: ["美国", "美区", "United States", "USA", "U.S.", "America"] },
+  { value: "India", aliases: ["印度", "India"] },
+  { value: "Mexico", aliases: ["墨西哥", "Mexico"] },
+  { value: "Pakistan", aliases: ["巴基斯坦", "Pakistan"] },
+  { value: "Bangladesh", aliases: ["孟加拉", "孟加拉国", "Bangladesh"] },
+  { value: "Indonesia", aliases: ["印尼", "印度尼西亚", "Indonesia"] },
+  { value: "Egypt", aliases: ["埃及", "Egypt"] },
+  { value: "Kenya", aliases: ["肯尼亚", "Kenya"] },
+  { value: "Nigeria", aliases: ["尼日利亚", "Nigeria"] },
+  { value: "Tunisia", aliases: ["突尼斯", "Tunisia"] },
+  { value: "Colombia", aliases: ["哥伦比亚", "Colombia"] },
+  { value: "Peru", aliases: ["秘鲁", "Peru"] },
+  { value: "Argentina", aliases: ["阿根廷", "Argentina"] },
+  { value: "Brazil", aliases: ["巴西", "Brazil"] },
+  { value: "Vietnam", aliases: ["越南", "Vietnam"] },
+  { value: "Philippines", aliases: ["菲律宾", "Philippines"] },
+];
+
+function aiMentionedCountry(intent) {
+  return aiMentionedCountries(intent)[0] || "全部";
+}
+
+function aiMentionedCountries(intent) {
+  const rawText = intent?.rawText || "";
+  const normalizedText = aiNormalizeText(rawText);
+  const availableCountries = uniqueValues(dashboardData.main.rows || [], "国家")
+    .filter((value) => value && value !== "全部");
+  const availableSet = new Set(availableCountries);
+  const fromAliases = AI_COUNTRY_ALIASES
+    .filter((item) => availableSet.has(item.value))
+    .filter((item) => item.aliases.some((alias) => normalizedText.includes(aiNormalizeText(alias))))
+    .map((item) => item.value);
+  const fromRawNames = availableCountries.filter((country) => aiTextIncludes(rawText, country));
+  const fromRecognizedDimensions = (intent?.focusDimensionValues || [])
+    .filter((item) => item.field === "国家" && availableSet.has(item.value))
+    .map((item) => item.value);
+  return uniqueArray(fromAliases.concat(fromRawNames, fromRecognizedDimensions));
+}
+
+function aiRowsForProject(project, dates, country = "全部") {
+  const reportDate = aiLatestReportDate();
+  let rows = dashboardData.main.rows.filter((row) =>
+    row["项目代号"] === project &&
+    dates.includes(row["首次访问日期"]) &&
+    (!reportDate || row["报表日期"] === reportDate) &&
+    (!country || country === "全部" || row["国家"] === country)
+  );
+  if (rows.some((row) => row["版本号"] === "全部")) {
+    rows = rows.filter((row) => row["版本号"] === "全部");
+  }
+  if (rows.some((row) => row["广告组"] === "全部")) {
+    rows = rows.filter((row) => row["广告组"] === "全部");
+  }
+  return rows;
+}
+
+function aiProjectCompareDates(projects, country) {
+  const reportDate = aiLatestReportDate();
+  const rows = dashboardData.main.rows.filter((row) =>
+    projects.includes(row["项目代号"]) &&
+    (!reportDate || row["报表日期"] === reportDate) &&
+    (!country || country === "全部" || row["国家"] === country) &&
+    (!row["版本号"] || row["版本号"] === "全部") &&
+    (!row["广告组"] || row["广告组"] === "全部")
+  );
+  const availableDates = sortDimensionValues("首次访问日期", uniqueValues(rows, "首次访问日期"));
+  const selected = (appState.aiDates || []).filter((date) => availableDates.includes(date));
+  return selected.length ? selected : aiDefaultDateSelection(availableDates);
+}
+
+function aiAggregateProject(project, dates, country = "全部", metrics = []) {
+  const rows = aiRowsForProject(project, dates, country);
+  return {
+    rows,
+    aggregated: rows.length ? aggregateRows(rows, metrics) : null,
+  };
+}
+
+function aiMetricChange(metric, oldValue, newValue) {
+  if (oldValue === null || oldValue === undefined || newValue === null || newValue === undefined) return null;
+  const delta = newValue - oldValue;
+  const kind = dashboardData.metricMeta[metric]?.kind;
+  const magnitude = kind === "count"
+    ? Math.abs(delta) / Math.max(Math.abs(oldValue), 1)
+    : Math.abs(delta);
+  const qualityMetric = metric !== "新增用户数";
+  const improved = !qualityMetric ? null : (aiMetricIsLowerBetter(metric) ? delta < 0 : delta > 0);
+  return {
+    metric,
+    oldValue,
+    newValue,
+    delta,
+    magnitude,
+    kind,
+    improved,
+  };
+}
+
+function aiFormatDelta(change) {
+  if (!change) return "暂无";
+  const sign = change.delta > 0 ? "+" : change.delta < 0 ? "-" : "";
+  if (change.kind === "count") {
+    const relative = change.oldValue ? `，${sign}${(Math.abs(change.delta) / Math.abs(change.oldValue) * 100).toFixed(1)}%` : "";
+    return `${sign}${Math.abs(Math.round(change.delta)).toLocaleString("zh-CN")}${relative}`;
+  }
+  if (change.kind === "rate") {
+    return `${sign}${Math.abs(change.delta * 100).toFixed(2)}个百分点`;
+  }
+  return `${sign}${Math.abs(change.delta).toFixed(2)}`;
+}
+
+function aiChangeTone(change) {
+  if (!change || change.metric === "新增用户数") return "中性";
+  if (Math.abs(change.delta) < 0.0001) return "持平";
+  return change.improved ? "变好" : "变差";
+}
+
+function aiChangeClass(change) {
+  const tone = aiChangeTone(change);
+  if (tone === "变好") return "best-cell";
+  if (tone === "变差") return "weak-cell";
+  return "";
+}
+
+function aiMetricSortRank(metric) {
+  if (metric.includes("留存率")) return 1;
+  if (metric.includes("卸载率")) return 2;
+  if (metric.includes("授权率")) return 3;
+  if (metric.includes("展示率") || metric.includes("展示用户率")) return 4;
+  if (metric.includes("点击率")) return 5;
+  if (metric.includes("转化率")) return 6;
+  if (metric.includes("人均展示次数")) return 20;
+  if (metric.includes("人均点击次数")) return 21;
+  if (metric.includes("次数")) return 22;
+  return 10;
+}
+
+function aiSortChangesForList(changes) {
+  return changes.slice().sort((a, b) =>
+    aiMetricSortRank(a.metric) - aiMetricSortRank(b.metric) ||
+    b.magnitude - a.magnitude ||
+    String(a.metric).localeCompare(String(b.metric), "zh-Hans-CN")
+  );
+}
+
+function aiSortChangesByMagnitude(changes) {
+  return changes.slice().sort((a, b) =>
+    b.magnitude - a.magnitude ||
+    aiMetricSortRank(a.metric) - aiMetricSortRank(b.metric) ||
+    String(a.metric).localeCompare(String(b.metric), "zh-Hans-CN")
+  );
+}
+
+function aiStrongestSummaryChange(changes) {
+  const rateChanges = changes.filter((change) => dashboardData.metricMeta[change.metric]?.kind === "rate");
+  return aiSortChangesByMagnitude(rateChanges.length ? rateChanges : changes)[0] || null;
+}
+
+function aiQualityChanges(analysis) {
+  let changes = analysis.changes
+    .filter((change) => change.metric !== "新增用户数" && Math.abs(change.delta) >= 0.0001);
+  if (analysis.intent?.wantsDayFocus) {
+    changes = changes.filter((change) =>
+      analysis.intent.focusDays.some((day) => aiMetricMatchesFocusedDay(change.metric, day))
+    );
+  }
+  if (analysis.intent?.wantsMetricFocus) {
+    changes = changes.filter((change) => analysis.intent.focusMetrics.includes(change.metric));
+  }
+  return aiSortChangesForList(changes);
+}
+
+function aiDirectAnswerText(analysis, improved, worsened) {
+  const text = String(analysis.intent.rawText || "").trim();
+  const strongestImproved = aiStrongestSummaryChange(improved);
+  const strongestWorsened = aiStrongestSummaryChange(worsened);
+  if (text && !analysis.intent.supported) {
+    return "这句输入暂时没有识别到看板里的指标、维度或常见分析意图；下面先展示默认的新旧版本整体对比。";
+  }
+  if (analysis.intent.wantsCauseDiagnosis) {
+    const diagnosis = aiBuildCauseDiagnosis(analysis);
+    return `针对你问的原因，初步判断：${diagnosis?.conclusion || "当前证据还不够，需要结合整体指标、国家分化和专项数据继续确认。"}`;
+  }
+  if (analysis.intent.wantsDayFocus) {
+    const dayLabel = analysis.intent.focusDays.join("、");
+    return `针对你问的 ${dayLabel} 数据变化，当前 ${dayLabel} 指标里 ${improved.length} 个变好、${worsened.length} 个变差。${strongestWorsened ? `最需要关注 ${strongestWorsened.metric}：${formatMetric(strongestWorsened.metric, strongestWorsened.oldValue)} → ${formatMetric(strongestWorsened.metric, strongestWorsened.newValue)}（${aiFormatDelta(strongestWorsened)}）。` : strongestImproved ? `改善最明显的是 ${strongestImproved.metric}：${formatMetric(strongestImproved.metric, strongestImproved.oldValue)} → ${formatMetric(strongestImproved.metric, strongestImproved.newValue)}（${aiFormatDelta(strongestImproved)}）。` : "当前没有明显变化。"}`;
+  }
+  if (analysis.intent.wantsMetricFocus) {
+    const metricLabel = analysis.intent.focusMetrics.slice(0, 4).join("、");
+    return `针对你提到的 ${metricLabel}，当前重点指标里 ${improved.length} 个变好、${worsened.length} 个变差。${strongestWorsened ? `最需要关注 ${strongestWorsened.metric}：${formatMetric(strongestWorsened.metric, strongestWorsened.oldValue)} → ${formatMetric(strongestWorsened.metric, strongestWorsened.newValue)}（${aiFormatDelta(strongestWorsened)}）。` : strongestImproved ? `改善最明显的是 ${strongestImproved.metric}：${formatMetric(strongestImproved.metric, strongestImproved.oldValue)} → ${formatMetric(strongestImproved.metric, strongestImproved.newValue)}（${aiFormatDelta(strongestImproved)}）。` : "当前没有明显变化。"}`;
+  }
+  if (analysis.intent.wantsFeature) {
+    const featureRisk = analysis.featureFocus
+      .flatMap((item) => item.worsened.map((change) => ({ item, change })))
+      .sort((a, b) => b.change.magnitude - a.change.magnitude)[0];
+    const featureGood = analysis.featureFocus
+      .flatMap((item) => item.improved.map((change) => ({ item, change })))
+      .sort((a, b) => b.change.magnitude - a.change.magnitude)[0];
+    if (featureRisk) {
+      return `针对你问的功能变化，当前最需要关注 ${featureRisk.item.analysisType} 里的 ${featureRisk.change.object}，新版本比旧版本下降 ${aiFeatureFormatDelta(featureRisk.change)}。`;
+    }
+    if (featureGood) {
+      return `针对你问的功能变化，当前功能专项整体没有明显风险，改善最明显的是 ${featureGood.item.analysisType} 里的 ${featureGood.change.object}，提升 ${aiFeatureFormatDelta(featureGood.change)}。`;
+    }
+  }
+  if (analysis.intent.wantsNotification) {
+    const notificationChanges = aiQualityChanges(analysis)
+      .filter((change) => aiNotificationMetrics(analysis.intent).includes(change.metric));
+    const notificationWorse = notificationChanges.filter((change) => aiChangeTone(change) === "变差");
+    const notificationBetter = notificationChanges.filter((change) => aiChangeTone(change) === "变好");
+    const notificationRisk = aiStrongestSummaryChange(notificationWorse);
+    const notificationGood = aiStrongestSummaryChange(notificationBetter);
+    if (notificationRisk) {
+      return `针对你问的通知/文案/时机，整体通知链路有风险，最需要关注 ${notificationRisk.metric}：${formatMetric(notificationRisk.metric, notificationRisk.oldValue)} → ${formatMetric(notificationRisk.metric, notificationRisk.newValue)}（${aiFormatDelta(notificationRisk)}）。`;
+    }
+    if (notificationGood) {
+      return `针对你问的通知/文案/时机，整体通知链路偏正向，改善最明显的是 ${notificationGood.metric}：${formatMetric(notificationGood.metric, notificationGood.oldValue)} → ${formatMetric(notificationGood.metric, notificationGood.newValue)}（${aiFormatDelta(notificationGood)}）。`;
+    }
+  }
+  if (text) {
+    return `针对你的问题，先看新旧版本整体效果：${improved.length} 个质量指标变好、${worsened.length} 个变差。${strongestWorsened ? `最需要关注 ${strongestWorsened.metric}。` : strongestImproved ? `改善最明显的是 ${strongestImproved.metric}。` : "当前没有明显质量指标变化。"}`;
+  }
+  return improved.length > worsened.length
+    ? `当前版本整体偏正向：${improved.length} 个质量指标变好、${worsened.length} 个变差。`
+    : worsened.length > improved.length
+    ? `当前版本整体偏谨慎：${worsened.length} 个质量指标变差、${improved.length} 个变好。`
+    : `当前版本表现比较分化：${improved.length} 个质量指标变好、${worsened.length} 个变差。`;
+}
+
+function aiSummaryBullets(analysis, oldUsers, newUsers) {
+  const qualityChanges = aiQualityChanges(analysis);
+  const improved = qualityChanges.filter((change) => aiChangeTone(change) === "变好");
+  const worsened = qualityChanges.filter((change) => aiChangeTone(change) === "变差");
+  const strongestImproved = aiStrongestSummaryChange(improved);
+  const strongestWorsened = aiStrongestSummaryChange(worsened);
+  const riskCountries = analysis.topCountries
+    .filter((item) => item.valid && item.negative > item.positive)
+    .slice(0, 3)
+    .map((item) => item.country);
+  const goodCountries = analysis.topCountries
+    .filter((item) => item.valid && item.positive > item.negative)
+    .slice(0, 3)
+    .map((item) => item.country);
+  const userDelta = newUsers - oldUsers;
+  const userText = `样本从 ${Math.round(oldUsers).toLocaleString("zh-CN")} 到 ${Math.round(newUsers).toLocaleString("zh-CN")}，新增用户数${userDelta >= 0 ? "增加" : "减少"} ${Math.abs(Math.round(userDelta)).toLocaleString("zh-CN")}，这里只作为样本背景，不参与变好变差判断。`;
+  const directionText = improved.length > worsened.length
+    ? `整体偏正向：${improved.length} 个质量指标变好、${worsened.length} 个变差，改善面更宽。`
+    : worsened.length > improved.length
+    ? `整体偏谨慎：${worsened.length} 个质量指标变差、${improved.length} 个变好，负向指标更多。`
+    : `整体比较分化：${improved.length} 个质量指标变好、${worsened.length} 个变差，需要拆到国家和专项指标看原因。`;
+  const keyText = [
+    strongestImproved ? `最明显的改善是 ${strongestImproved.metric}：${formatMetric(strongestImproved.metric, strongestImproved.oldValue)} → ${formatMetric(strongestImproved.metric, strongestImproved.newValue)}（${aiFormatDelta(strongestImproved)}）。` : "",
+    strongestWorsened ? `最需要关注的是 ${strongestWorsened.metric}：${formatMetric(strongestWorsened.metric, strongestWorsened.oldValue)} → ${formatMetric(strongestWorsened.metric, strongestWorsened.newValue)}（${aiFormatDelta(strongestWorsened)}）。` : "",
+  ].filter(Boolean).join(" ");
+  const countryText = riskCountries.length || goodCountries.length
+    ? `头部国家里，${goodCountries.length ? `${goodCountries.join("、")}偏正向` : "暂无明显偏正向国家"}；${riskCountries.length ? `${riskCountries.join("、")}需要重点看` : "暂无明显偏负向国家"}。`
+    : "头部国家暂时没有足够分化信号。";
+  const recognizedText = [
+    analysis.intent.focusMetrics.length ? `指标：${analysis.intent.focusMetrics.slice(0, 5).join("、")}` : "",
+    analysis.intent.focusDimensions.length ? `维度：${analysis.intent.focusDimensions.join("、")}` : "",
+    analysis.intent.focusDimensionValues.length ? `维度值：${analysis.intent.focusDimensionValues.slice(0, 5).map((item) => `${item.field}=${item.value}`).join("、")}` : "",
+  ].filter(Boolean).join("；");
+  const focusText = recognizedText
+    ? `已根据输入优先关注 ${recognizedText}。`
+    : analysis.intent.wantsFeature
+    ? "因为已选择或输入提到功能模块，下面会额外列出功能专项变化。"
+    : analysis.intent.wantsNotification
+    ? "因为已选择或输入提到通知/文案/时机，下面会额外列出通知专项变化。"
+    : "如果要继续定位原因，优先看负向指标对应的国家和版本明细。";
+  return [aiDirectAnswerText(analysis, improved, worsened), keyText || directionText, countryText, userText, focusText].filter(Boolean);
+}
+
+function aiRenderSummaryPanel(title, bullets) {
+  const [primary, secondary, country, sample, focus] = bullets;
+  const summaryBlock = (label, text, tone) => {
+    if (!text) return "";
+    const palette = {
+      key: { accent: "#2563eb", bg: "rgba(37,99,235,0.10)", border: "rgba(37,99,235,0.32)" },
+      country: { accent: "#0f766e", bg: "rgba(15,118,110,0.10)", border: "rgba(15,118,110,0.28)" },
+      sample: { accent: "#b45309", bg: "rgba(180,83,9,0.10)", border: "rgba(180,83,9,0.28)" },
+    }[tone] || { accent: "var(--accent)", bg: "rgba(247,250,252,0.92)", border: "rgba(86,102,115,0.18)" };
+    return `
+    <div style="position:relative; border:2px solid ${palette.border}; border-radius:20px; padding:20px 22px 22px; background:linear-gradient(135deg, ${palette.bg}, rgba(255,255,255,0.96)); box-shadow:0 16px 34px rgba(15,23,42,0.07); overflow:hidden;">
+      <div style="position:absolute; left:0; top:0; bottom:0; width:6px; background:${palette.accent};"></div>
+      <div style="display:inline-flex; align-items:center; min-height:28px; padding:4px 12px; border-radius:999px; background:${palette.accent}; color:#fff; font-size:14px; font-weight:800;">${label}</div>
+      <div style="margin-top:14px; font-size:20px; line-height:1.75; font-weight:800; color:var(--ink);">${text}</div>
+    </div>
+  `;
+  };
+  return `
+    <div style="border:1px solid rgba(86,102,115,0.16); border-radius:22px; padding:28px 32px; margin-bottom:28px; background:rgba(255,255,255,0.82); box-shadow:0 18px 42px rgba(15,23,42,0.06);">
+      <div class="eyebrow">${title}</div>
+      <h3 style="margin:10px 0 24px; line-height:1.55; max-width:1080px; font-size:24px;">${primary || "当前筛选下暂无足够结论。"}</h3>
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:20px;">
+        ${summaryBlock("关键指标", secondary, "key")}
+        ${summaryBlock("国家分化", country, "country")}
+        ${summaryBlock("样本背景", sample, "sample")}
+      </div>
+      ${focus ? `<div style="margin-top:22px; padding:14px 18px; border-radius:16px; background:rgba(37,99,235,0.06); color:var(--muted); line-height:1.7; font-weight:700;">${focus}</div>` : ""}
+    </div>
+  `;
+}
+
+function aiTopCountries(project, oldVersion, newVersion, dates, limit = 5) {
+  const reportDate = aiLatestReportDate();
+  let rows = dashboardData.main.rows.filter((row) =>
+    row["项目代号"] === project &&
+    [oldVersion, newVersion].includes(row["版本号"]) &&
+    dates.includes(row["首次访问日期"]) &&
+    row["国家"] &&
+    row["国家"] !== "全部" &&
+    row["国家"] !== "(not set)" &&
+    (!reportDate || row["报表日期"] === reportDate)
+  );
+  if (rows.some((row) => row["广告组"] === "全部")) {
+    rows = rows.filter((row) => row["广告组"] === "全部");
+  }
+  const countryMap = new Map();
+  rows.forEach((row) => {
+    const country = row["国家"];
+    countryMap.set(country, (countryMap.get(country) || 0) + Number(row["新增用户数"] || 0));
+  });
+  return [...countryMap.entries()]
+    .map(([country, users]) => ({ country, users }))
+    .sort((a, b) => b.users - a.users)
+    .slice(0, limit);
+}
+
+const AI_NOTIFICATION_METRICS = [
+  "通知授权率_D0",
+  "通知展示率_D0",
+  "人均展示次数_D0",
+  "通知点击率_D0",
+  "人均点击次数_D0",
+  "卸载率_D0",
+];
+
+function aiNotificationMetrics(intent) {
+  if (intent?.wantsDayFocus) {
+    const focused = COMPARE_METRICS.filter((metric) =>
+      intent.focusDays.some((day) => aiMetricMatchesFocusedDay(metric, day)) &&
+      (/通知|展示|点击|人均|卸载/.test(metric))
+    );
+    return focused.length ? sortCompareMetrics(focused) : AI_NOTIFICATION_METRICS.filter((metric) => COMPARE_METRICS.includes(metric));
+  }
+  return AI_NOTIFICATION_METRICS.filter((metric) => COMPARE_METRICS.includes(metric));
+}
+
+const AI_TIMING_METRICS = [
+  "D0展示用户率",
+  "D0人均展示次数",
+  "D0通知点击率",
+  "D0人均点击次数",
+  "D0通知点击转化率",
+];
+
+function aiSelectedDirections() {
+  const allowed = AI_ANALYSIS_DIRECTIONS.map((item) => item.key);
+  const selected = uniqueArray((appState.aiDirections || []).filter((key) => allowed.includes(key)));
+  return selected.length ? selected : AI_DEFAULT_ANALYSIS_DIRECTIONS.slice();
+}
+
+function aiHasDirection(key) {
+  return aiSelectedDirections().includes(key);
+}
+
+function aiDetectIntent(text) {
+  const rawText = String(text || "");
+  const selectedDirections = aiSelectedDirections();
+  const hasDirection = (key) => selectedDirections.includes(key);
+  const focusTerms = [];
+  [
+    ["安装", ["安装", "install", "App安装", "应用安装"]],
+    ["卸载", ["卸载", "uninstall", "App卸载", "应用卸载"]],
+    ["截图", ["截图", "截屏", "screenshot"]],
+    ["解锁", ["解锁", "unlock"]],
+    ["广告召回", ["广告召回", "召回", "ad recall"]],
+    ["home", ["home", "首页"]],
+    ["图片", ["图片", "photo", "照片"]],
+    ["视频", ["视频", "video"]],
+    ["音频", ["音频", "audio", "音乐"]],
+    ["文件", ["文件", "document"]],
+    ["清理", ["清理", "clean", "junk"]],
+  ].forEach(([label, keywords]) => {
+    if (keywords.some((keyword) => rawText.toLowerCase().includes(String(keyword).toLowerCase()))) {
+      focusTerms.push(label);
+    }
+  });
+  const wantsNotification = hasDirection("notification") || /通知|推送|文案|时机|安装|卸载|触发|push|fcm/i.test(rawText);
+  const wantsFeature = hasDirection("feature") || /功能|模块|首页|点击|漏斗|首次启动|启动流程|引导|到达|流失|恢复|清理|图片|视频|音频|文件|截图|扫描/i.test(rawText);
+  const wantsCopy = /文案|安装|卸载|截图|截屏|home|图片|视频|音频|清理|恢复|photo|video|audio/i.test(rawText);
+  const wantsTiming = /时机|触发|解锁|召回|fcm|安装|卸载/i.test(rawText);
+  const asksCause = /原因|为什么|找下|排查|定位|怀疑|怎么回事|哪里/i.test(rawText);
+  const mentionsUninstallRisk = /卸载率.*(提高|升高|上升|变高|变差|增加)|卸载.*(提高|升高|上升|变高|变差|增加)/i.test(rawText);
+  const mentionsRetentionNoLift = /留存.*(没有提升|没提升|不升|未提升|下降|变差)|D1.*(没有提升|没提升|不升|未提升|下降|变差)/i.test(rawText);
+  const mentionsNoLimitPush = /没有限制|无限制|不限制|有触发就.*推|触发就.*推|频率|频控|放开/i.test(rawText);
+  let focusDays = uniqueArray((rawText.match(/D[0-4]/gi) || []).map((day) => day.toUpperCase()));
+  const mentionsDayScope = focusDays.length > 0 && /D[0-4].{0,10}(数据|指标|差异|对比|表现|变化)|(数据|指标|差异|对比|表现|变化).{0,10}D[0-4]/i.test(rawText);
+  const strictDayFocus = focusDays.length > 0 && (
+    /只|仅|单独|只看|只分析|只需要|不用看其他|不要.*D1|不要.*D0/i.test(rawText) || mentionsDayScope
+  );
+  if (hasDirection("d1") && !focusDays.includes("D1")) {
+    focusDays = focusDays.concat("D1");
+  }
+  const focusMetrics = aiMatchedMetrics(rawText);
+  const focusDimensions = aiMatchedDimensions(rawText);
+  const focusDimensionValues = aiMatchedDimensionValues(rawText);
+  const wantsCauseDiagnosis = hasDirection("cause") || asksCause || mentionsUninstallRisk || mentionsRetentionNoLift || mentionsNoLimitPush;
+  const asksGeneralAnalysis = /效果|变化|变好|变差|指标|数据|对比|分析|迭代|版本|表现|提升|下降|异常|问题|趋势/i.test(rawText);
+  const supported = !rawText.trim() || selectedDirections.length || asksGeneralAnalysis || wantsNotification || wantsFeature || wantsCauseDiagnosis || focusDays.length || focusMetrics.length || focusDimensions.length || focusDimensionValues.length;
+  return {
+    rawText,
+    selectedDirections,
+    wantsNotification,
+    wantsFeature,
+    focusDays,
+    strictDayFocus,
+    focusMetrics,
+    focusDimensions,
+    focusDimensionValues,
+    wantsDayFocus: hasDirection("d1") || strictDayFocus || (focusDays.length > 0 && !wantsCauseDiagnosis),
+    wantsMetricFocus: focusMetrics.length > 0,
+    asksCause,
+    mentionsUninstallRisk,
+    mentionsRetentionNoLift,
+    mentionsNoLimitPush,
+    wantsCauseDiagnosis,
+    supported,
+    analysisTypes: wantsNotification
+      ? (wantsCopy ? ["通知文案", "通知时机"] : wantsTiming ? ["通知时机", "通知文案"] : ["通知文案", "通知时机"])
+      : [],
+    focusTerms: focusTerms.length ? focusTerms : [],
+  };
+}
+
+function aiTimingReportDate() {
+  return sortDimensionValues("报表日期", uniqueValues(dashboardData.timing?.rows || [], "报表日期")).slice(-1)[0] || "";
+}
+
+function aiTimingMetrics(intent) {
+  const available = dashboardData.timing?.metrics || [];
+  if (intent?.wantsDayFocus) {
+    const focused = available.filter((metric) =>
+      intent.focusDays.some((day) => String(metric).startsWith(day))
+    );
+    if (focused.length) return focused;
+  }
+  return AI_TIMING_METRICS.filter((metric) => available.includes(metric));
+}
+
+function aiTimingRowsForVersion(project, version, dates, options = {}) {
+  const reportDate = aiTimingReportDate();
+  const analysisType = options.analysisType || "";
+  const objectName = options.objectName || "";
+  const country = options.country || "全部";
+  return (dashboardData.timing?.rows || []).filter((row) =>
+    row["项目代号"] === project &&
+    row["版本号"] === version &&
+    dates.includes(row["首次访问日期"]) &&
+    (!reportDate || row["报表日期"] === reportDate) &&
+    (!analysisType || !row["分析类型"] || row["分析类型"] === analysisType) &&
+    (!objectName || row["通知时机"] === objectName) &&
+    (!country || row["国家"] === country)
+  );
+}
+
+function aiTimingAggregate(project, version, dates, options = {}, intent = null) {
+  const metrics = aiTimingMetrics(intent);
+  const rows = aiTimingRowsForVersion(project, version, dates, options);
+  return {
+    rows,
+    aggregated: rows.length ? aggregateRows(rows, metrics) : null,
+  };
+}
+
+function aiTimingObjectsForIntent(project, oldVersion, newVersion, dates, intent) {
+  if (!intent.wantsNotification) return [];
+  const reportDate = aiTimingReportDate();
+  const versions = [oldVersion, newVersion].filter(Boolean);
+  const rows = (dashboardData.timing?.rows || []).filter((row) =>
+    row["项目代号"] === project &&
+    versions.includes(row["版本号"]) &&
+    dates.includes(row["首次访问日期"]) &&
+    (!reportDate || row["报表日期"] === reportDate)
+  );
+  const candidates = [];
+  intent.analysisTypes.forEach((analysisType) => {
+    const values = uniqueValues(rows.filter((row) => !row["分析类型"] || row["分析类型"] === analysisType), "通知时机");
+    const matched = values.filter((value) => {
+      const lower = String(value || "").toLowerCase();
+      return intent.focusTerms.length
+        ? intent.focusTerms.some((term) => lower.includes(term.toLowerCase()) || String(value).includes(term))
+        : true;
+    });
+    matched.forEach((objectName) => {
+      if (objectName && objectName !== "全部") {
+        candidates.push({ analysisType, objectName });
+      }
+    });
+  });
+  const seen = {};
+  const uniqueCandidates = candidates.filter((item) => {
+    const key = `${item.analysisType}|${item.objectName}`;
+    if (seen[key]) return false;
+    seen[key] = true;
+    return true;
+  });
+  const text = String(intent.rawText || "");
+  const wantsCopyFirst = /文案|安装|卸载|截图|截屏|home|图片|视频|音频|清理|恢复/i.test(text);
+  const scoreMetricNames = [
+    "D0展示用户率",
+    "D0人均展示次数",
+    "D0通知点击率",
+    "D0人均点击次数",
+    "D0通知点击转化率",
+  ].filter((metric) => (dashboardData.timing?.metrics || []).includes(metric));
+  const scored = uniqueCandidates.map((item) => {
+    const oldAgg = aiTimingAggregate(project, oldVersion, dates, item, null).aggregated || {};
+    const newAgg = aiTimingAggregate(project, newVersion, dates, item, null).aggregated || {};
+    const changes = scoreMetricNames.map((metric) => aiMetricChange(metric, oldAgg[metric], newAgg[metric])).filter(Boolean);
+    const risingScore = changes
+      .filter((change) => change.delta > 0)
+      .reduce((sum, change) => sum + change.magnitude, 0);
+    const riskScore = changes
+      .filter((change) => aiChangeTone(change) === "变差")
+      .reduce((sum, change) => sum + change.magnitude, 0);
+    const focusScore = intent.focusTerms.some((term) => String(item.objectName).includes(term)) ? 10 : 0;
+    const typeScore = wantsCopyFirst && item.analysisType === "通知文案" ? 3 : item.analysisType === "通知文案" ? 1 : 0;
+    return {
+      ...item,
+      score: focusScore + typeScore + risingScore + riskScore * 0.5,
+      risingScore,
+      riskScore,
+    };
+  }).sort((a, b) => b.score - a.score || b.risingScore - a.risingScore || String(a.objectName).localeCompare(String(b.objectName), "zh-Hans-CN", { numeric: true }));
+  return scored.slice(0, intent.focusTerms.length ? 8 : 6).map(({ analysisType, objectName }) => ({ analysisType, objectName }));
+}
+
+function aiTimingChange(project, oldVersion, newVersion, dates, objectItem, country = "全部", intent = null) {
+  const options = { ...objectItem, country };
+  const oldData = aiTimingAggregate(project, oldVersion, dates, options, intent);
+  const newData = aiTimingAggregate(project, newVersion, dates, options, intent);
+  const changes = aiTimingMetrics(intent)
+    .map((metric) => aiMetricChange(metric, oldData.aggregated?.[metric], newData.aggregated?.[metric]))
+    .filter(Boolean);
+  return {
+    ...objectItem,
+    oldData,
+    newData,
+    changes,
+    rankedChanges: changes.slice().sort((a, b) => b.magnitude - a.magnitude),
+  };
+}
+
+function aiFeatureReportDate() {
+  return sortDimensionValues("报表日期", uniqueValues(featureRows(), "报表日期")).slice(-1)[0] || "";
+}
+
+function aiFeatureAnalysisTypesForIntent(project, oldVersion, newVersion, dates, intent) {
+  if (!intent.wantsFeature) return [];
+  const reportDate = aiFeatureReportDate();
+  const versions = [oldVersion, newVersion].filter(Boolean);
+  const rows = featureRows().filter((row) =>
+    row["项目代号"] === project &&
+    versions.includes(row["版本号"]) &&
+    dates.includes(row["首次访问日期"]) &&
+    (!reportDate || row["报表日期"] === reportDate)
+  );
+  const types = uniqueValues(rows, "分析类型");
+  const text = intent.rawText || "";
+  const preferred = [];
+  if (/首页|模块|点击/i.test(text)) {
+    preferred.push(...types.filter((type) => String(type).includes("首页") || String(type).includes("点击")));
+  }
+  if (/首次启动|启动流程/i.test(text)) {
+    preferred.push(...types.filter((type) => String(type).includes("首次启动")));
+  }
+  if (/漏斗|引导/i.test(text)) {
+    const focusedFunnels = intent.focusTerms.length
+      ? types.filter((type) => String(type).includes("漏斗") && intent.focusTerms.some((term) => String(type).includes(term)))
+      : [];
+    preferred.push(...(focusedFunnels.length ? focusedFunnels : types.filter((type) => String(type).includes("漏斗")).slice(0, 2)));
+  }
+  intent.focusTerms.forEach((term) => {
+    preferred.push(...types.filter((type) => String(type).includes(term)));
+  });
+  if (!preferred.length) {
+    preferred.push(...types);
+  }
+  const seen = {};
+  return preferred.filter((type) => {
+    if (!type || seen[type]) return false;
+    seen[type] = true;
+    return true;
+  }).slice(0, 4);
+}
+
+function aiFeatureRowsForVersion(project, version, dates, analysisType, country = "全部") {
+  const reportDate = aiFeatureReportDate();
+  const baseRows = featureRows().filter((row) =>
+    row["项目代号"] === project &&
+    row["版本号"] === version &&
+    dates.includes(row["首次访问日期"]) &&
+    row["分析类型"] === analysisType &&
+    (!reportDate || row["报表日期"] === reportDate)
+  );
+  if (country && baseRows.some((row) => row["国家"] === country)) {
+    return baseRows.filter((row) => row["国家"] === country);
+  }
+  return baseRows;
+}
+
+function aiFeatureChange(project, oldVersion, newVersion, dates, analysisType, country = "全部") {
+  const oldRows = aiFeatureRowsForVersion(project, oldVersion, dates, analysisType, country);
+  const newRows = aiFeatureRowsForVersion(project, newVersion, dates, analysisType, country);
+  const objects = uniqueValues([...oldRows, ...newRows], "分析对象").filter((object) => object && object !== "新增用户");
+  const changes = objects.map((object) => {
+    const oldValue = weightedFeatureValue(oldRows, object, "D0");
+    const newValue = weightedFeatureValue(newRows, object, "D0");
+    if (oldValue === null || newValue === null) return null;
+    const delta = newValue - oldValue;
+    return {
+      analysisType,
+      object,
+      metric: `${object}_D0`,
+      oldValue,
+      newValue,
+      delta,
+      magnitude: Math.abs(delta),
+      kind: "rate",
+      improved: delta > 0,
+    };
+  }).filter(Boolean);
+  const stepValues = objects.map((object) => ({
+    object,
+    value: weightedFeatureValue(newRows, object, "D0"),
+  })).filter((item) => item.value !== null);
+  const drops = stepValues.slice(1).map((item, index) => ({
+    from: stepValues[index].object,
+    to: item.object,
+    drop: stepValues[index].value - item.value,
+  })).filter((item) => item.drop > 0).sort((a, b) => b.drop - a.drop);
+  return {
+    analysisType,
+    oldRows,
+    newRows,
+    oldUsers: featureSampleUsersForRows(oldRows),
+    newUsers: featureSampleUsersForRows(newRows),
+    changes,
+    rankedChanges: changes.slice().sort((a, b) => b.magnitude - a.magnitude),
+    improved: changes.filter((change) => change.improved).sort((a, b) => b.magnitude - a.magnitude),
+    worsened: changes.filter((change) => change.improved === false).sort((a, b) => b.magnitude - a.magnitude),
+    mainDrop: drops[0] || null,
+  };
+}
+
+function aiFeatureFormatDelta(change) {
+  if (!change) return "暂无";
+  const sign = change.delta > 0 ? "+" : change.delta < 0 ? "-" : "";
+  return `${sign}${Math.abs(change.delta * 100).toFixed(2)}个百分点`;
+}
+
+function aiBuildFeatureFocus(project, oldVersion, newVersion, dates, intent) {
+  return aiFeatureAnalysisTypesForIntent(project, oldVersion, newVersion, dates, intent)
+    .map((analysisType) => aiFeatureChange(project, oldVersion, newVersion, dates, analysisType))
+    .filter((item) => item.changes.length);
+}
+
+function aiFeatureRowsForProject(project, dates, analysisType, country = "全部") {
+  const reportDate = aiFeatureReportDate();
+  let rows = featureRows().filter((row) =>
+    row["项目代号"] === project &&
+    dates.includes(row["首次访问日期"]) &&
+    row["分析类型"] === analysisType &&
+    (!reportDate || row["报表日期"] === reportDate)
+  );
+  if (rows.some((row) => row["版本号"] === "全部")) {
+    rows = rows.filter((row) => row["版本号"] === "全部");
+  }
+  if (country && rows.some((row) => row["国家"] === country)) {
+    rows = rows.filter((row) => row["国家"] === country);
+  }
+  return rows;
+}
+
+function aiFeatureAnalysisTypesForProjectCompare(projects, dates, intent) {
+  const reportDate = aiFeatureReportDate();
+  const rows = featureRows().filter((row) =>
+    projects.includes(row["项目代号"]) &&
+    dates.includes(row["首次访问日期"]) &&
+    (!reportDate || row["报表日期"] === reportDate)
+  );
+  const types = uniqueValues(rows, "分析类型").filter(Boolean);
+  const text = intent?.rawText || "";
+  const preferred = [];
+  if (/首次启动|启动流程/i.test(text)) {
+    preferred.push(...types.filter((type) => String(type).includes("首次启动")));
+  }
+  if (/漏斗|引导/i.test(text)) {
+    preferred.push(...types.filter((type) => String(type).includes("漏斗")));
+  }
+  if (/首页|模块|点击/i.test(text)) {
+    preferred.push(...types.filter((type) => String(type).includes("首页") || String(type).includes("点击")));
+  }
+  (intent?.focusTerms || []).forEach((term) => {
+    preferred.push(...types.filter((type) => String(type).includes(term)));
+  });
+  return uniqueArray((preferred.length ? preferred : types).filter(Boolean)).slice(0, 6);
+}
+
+function aiFeatureProjectCompareItem(baseProject, compareProject, dates, analysisType, country = "全部") {
+  const baseRows = aiFeatureRowsForProject(baseProject, dates, analysisType, country);
+  const compareRows = aiFeatureRowsForProject(compareProject, dates, analysisType, country);
+  const objects = uniqueValues(baseRows.concat(compareRows), "分析对象")
+    .filter((object) => object && object !== "新增用户");
+  const changes = objects.map((object) => {
+    const baseValue = weightedFeatureValue(baseRows, object, "D0");
+    const compareValue = weightedFeatureValue(compareRows, object, "D0");
+    if (baseValue === null || compareValue === null) return null;
+    const delta = compareValue - baseValue;
+    return {
+      analysisType,
+      object,
+      metric: object,
+      oldValue: baseValue,
+      newValue: compareValue,
+      delta,
+      magnitude: Math.abs(delta),
+      kind: "rate",
+      improved: delta > 0,
+    };
+  }).filter(Boolean);
+  const rankedChanges = changes.slice().sort((a, b) => b.magnitude - a.magnitude);
+  return {
+    analysisType,
+    country,
+    dates,
+    hasData: !!baseRows.length && !!compareRows.length && !!changes.length,
+    sample: {
+      baseUsers: Math.round(featureSampleUsersForRows(baseRows) || 0),
+      compareUsers: Math.round(featureSampleUsersForRows(compareRows) || 0),
+    },
+    strongestChanges: rankedChanges.slice(0, 8).map((change) => ({
+      object: change.object,
+      baseValue: featureValue("D0", change.oldValue),
+      compareValue: featureValue("D0", change.newValue),
+      delta: aiFeatureFormatDelta(change),
+      judgment: change.delta > 0 ? `${compareProject} 更高` : change.delta < 0 ? `${baseProject} 更高` : "基本持平",
+    })),
+    tableRows: rankedChanges.slice(0, 12).map((change) => ({
+      range: country === "全部" ? "整体" : country,
+      analysisType,
+      object: change.object,
+      baseObject: baseProject,
+      baseValue: featureValue("D0", change.oldValue),
+      compareObject: compareProject,
+      compareValue: featureValue("D0", change.newValue),
+      delta: aiFeatureFormatDelta(change),
+      judgment: change.delta > 0 ? `${compareProject} 更高` : change.delta < 0 ? `${baseProject} 更高` : "基本持平",
+    })),
+  };
+}
+
+function aiBuildFeatureProjectCompareContext(baseProject, compareProject, dates, requestedCountries, intent) {
+  if (!intent?.wantsFeature) return null;
+  const analysisTypes = aiFeatureAnalysisTypesForProjectCompare([baseProject, compareProject], dates, intent);
+  const countries = uniqueArray(["全部"].concat(requestedCountries || []));
+  const modules = countries.flatMap((country) =>
+    analysisTypes.map((analysisType) =>
+      aiFeatureProjectCompareItem(baseProject, compareProject, dates, analysisType, country)
+    )
+  ).filter((item) => item.hasData);
+  return {
+    taskType: "项目间功能模块对比",
+    baseProject,
+    compareProject,
+    dates,
+    requestedCountries,
+    analysisTypes,
+    hasData: modules.length > 0,
+    modules: modules.slice(0, 12),
+    comparisonTableRows: modules.flatMap((item) => item.tableRows || []).slice(0, 80),
+  };
+}
+
+function aiBuildNotificationSummary(changes) {
+  const notificationChanges = changes.filter((change) => aiNotificationMetrics(aiDetectIntent(appState.aiIterationText)).includes(change.metric));
+  if (!notificationChanges.length) return "当前筛选下没有足够的整体通知指标可判断。";
+  const worsened = notificationChanges.filter((change) => aiChangeTone(change) === "变差");
+  const improved = notificationChanges.filter((change) => aiChangeTone(change) === "变好");
+  const strongest = notificationChanges.slice().sort((a, b) => b.magnitude - a.magnitude)[0];
+  const mainText = strongest
+    ? `${strongest.metric}变化最明显：${formatMetric(strongest.metric, strongest.oldValue)} → ${formatMetric(strongest.metric, strongest.newValue)}（${aiFormatDelta(strongest)}，${aiChangeTone(strongest)}）。`
+    : "";
+  if (worsened.length > improved.length) {
+    return `整体通知链路偏谨慎：${worsened.map((item) => item.metric).join("、")}变差。${mainText}`;
+  }
+  if (improved.length > worsened.length) {
+    return `整体通知链路偏正向：${improved.map((item) => item.metric).join("、")}变好。${mainText}`;
+  }
+  return `整体通知链路有升有降，需要结合文案专项看。${mainText}`;
+}
+
+function aiChangeByMetric(changes, metric) {
+  return changes.find((change) => change.metric === metric) || null;
+}
+
+function aiIsNotImproved(change) {
+  return !!change && aiChangeTone(change) !== "变好";
+}
+
+function aiBuildCauseDiagnosis(analysis) {
+  const primaryDay = analysis.intent?.wantsDayFocus ? (analysis.intent.focusDays?.[0] || "D0") : "D0";
+  const uninstall = aiChangeByMetric(analysis.changes, `卸载率_${primaryDay}`);
+  const retention = aiChangeByMetric(analysis.changes, "D1留存率");
+  const showRate = aiChangeByMetric(analysis.changes, `通知展示率_${primaryDay}`);
+  const showAvg = aiChangeByMetric(analysis.changes, `人均展示次数_${primaryDay}`);
+  const clickRate = aiChangeByMetric(analysis.changes, `通知点击率_${primaryDay}`);
+  const clickAvg = aiChangeByMetric(analysis.changes, `人均点击次数_${primaryDay}`);
+  const uninstallWorse = uninstall && aiChangeTone(uninstall) === "变差";
+  const retentionNoLift = retention && aiIsNotImproved(retention);
+  const exposureUp = [showRate, showAvg].some((change) => change && change.delta > 0);
+  const clickNotSync = [clickRate, clickAvg].some((change) => change && aiIsNotImproved(change));
+  const focusRisks = analysis.timingFocus.map((item) => {
+    const exposure = item.changes.filter((change) =>
+      [`${primaryDay}展示用户率`, `${primaryDay}人均展示次数`].includes(change.metric) && change.delta > 0
+    );
+    const weak = item.changes.filter((change) =>
+      [`${primaryDay}通知点击率`, `${primaryDay}通知点击转化率`, `${primaryDay}人均点击次数`].includes(change.metric) && aiIsNotImproved(change)
+    );
+    const strongestRisk = aiStrongestSummaryChange(item.changes.filter((change) => aiChangeTone(change) === "变差"));
+    return {
+      item,
+      exposure,
+      weak,
+      strongestRisk,
+      suspicious: exposure.length && (weak.length || uninstallWorse || retentionNoLift),
+    };
+  }).filter((item) => item.suspicious);
+  const riskCountries = analysis.topCountries
+    .filter((item) => item.valid)
+    .map((item) => {
+      const uninstallChange = aiChangeByMetric(item.changes, `卸载率_${primaryDay}`);
+      const retentionChange = aiChangeByMetric(item.changes, "D1留存率");
+      const reasons = [];
+      if (uninstallChange && aiChangeTone(uninstallChange) === "变差") {
+        reasons.push(`卸载率 ${formatMetric(uninstallChange.metric, uninstallChange.oldValue)} → ${formatMetric(uninstallChange.metric, uninstallChange.newValue)}`);
+      }
+      if (retentionChange && aiIsNotImproved(retentionChange)) {
+        reasons.push(`D1留存 ${formatMetric(retentionChange.metric, retentionChange.oldValue)} → ${formatMetric(retentionChange.metric, retentionChange.newValue)}`);
+      }
+      return { ...item, reasons };
+    })
+    .filter((item) => item.reasons.length)
+    .slice(0, 5);
+  const evidence = [];
+  if (uninstallWorse) evidence.push(`卸载率已经变差：${formatMetric(uninstall.metric, uninstall.oldValue)} → ${formatMetric(uninstall.metric, uninstall.newValue)}（${aiFormatDelta(uninstall)}）。`);
+  if (retentionNoLift) evidence.push(`D1留存没有改善：${formatMetric(retention.metric, retention.oldValue)} → ${formatMetric(retention.metric, retention.newValue)}（${aiFormatDelta(retention)}）。`);
+  if (exposureUp) {
+    const exposureText = [showRate, showAvg]
+      .filter((change) => change && change.delta > 0)
+      .map((change) => `${change.metric} ${formatMetric(change.metric, change.oldValue)} → ${formatMetric(change.metric, change.newValue)}`)
+      .join("；");
+    evidence.push(`通知触达变强：${exposureText}。`);
+  }
+  if (clickNotSync) {
+    const clickText = [clickRate, clickAvg]
+      .filter((change) => change && aiIsNotImproved(change))
+      .map((change) => `${change.metric} ${formatMetric(change.metric, change.oldValue)} → ${formatMetric(change.metric, change.newValue)}`)
+      .join("；");
+    evidence.push(`点击质量没有同步改善：${clickText}。`);
+  }
+  const signalCount = [uninstallWorse, retentionNoLift, exposureUp, clickNotSync, !!focusRisks.length].filter(Boolean).length;
+  const conclusion = signalCount >= 4
+    ? "更像是推送触发放开后，触达压力增加，但用户意图没有同步提升，导致卸载率上升且留存没有吃到收益。"
+    : signalCount >= 2
+    ? "目前存在推送触达压力变大的迹象，但还需要结合安装/卸载文案和头部国家进一步确认。"
+    : "当前证据还不足以直接归因到推送逻辑，需要先看整体通知指标和专项文案是否真的发生明显变化。";
+  const nextSteps = [
+    focusRisks.length
+      ? `优先收敛 ${focusRisks.slice(0, 3).map((item) => `${item.item.analysisType}-${item.item.objectName}`).join("、")}：这些专项同时出现触达增强和质量承接不足的迹象，可以先降低频次、增加冷却时间或提高触发门槛。`
+      : "先确认安装、卸载相关文案或时机是否有展示用户率、人均展示次数明显上升；如果有，优先给这些触发加频控或延迟触达。",
+    riskCountries.length
+      ? `对 ${riskCountries.map((item) => item.country).join("、")} 做国家差异化处理：先灰度回退或降低推送强度，避免头部国家继续拖累整体。`
+      : "如果头部国家没有明显分化，说明可能是全局策略影响，可以先整体降低触达强度再观察。",
+    analysis.intent.mentionsNoLimitPush
+      ? "建议恢复基础频控实验：例如同类文案每日上限、安装/卸载触发冷却、连续触发合并，再观察卸载率和D1留存是否回稳。"
+      : "建议补充触发次数或推送次数分层；如果高触发用户卸载更高，就优先从频次和触发门槛优化。",
+  ];
+  return {
+    conclusion,
+    evidence,
+    nextSteps,
+    focusRisks,
+    riskCountries,
+    signalCount,
+  };
+}
+
+function aiRenderCauseDiagnosis(analysis) {
+  const diagnosis = aiBuildCauseDiagnosis(analysis);
+  if (!diagnosis || (!analysis.intent.wantsCauseDiagnosis && diagnosis.signalCount < 2)) return "";
+  const focusRows = diagnosis.focusRisks.slice(0, 4).map((risk) => {
+    const exposure = risk.exposure[0];
+    const weak = risk.weak[0] || risk.strongestRisk;
+    return `
+      <div style="display:grid; grid-template-columns:minmax(170px, 0.9fr) minmax(240px, 1.2fr) minmax(240px, 1.2fr); gap:18px; align-items:start; padding:14px 0; border-top:1px solid rgba(86,102,115,0.12);">
+        <strong>${risk.item.analysisType}-${risk.item.objectName}</strong>
+        <span class="muted">${exposure ? `${exposure.metric}：${formatMetric(exposure.metric, exposure.oldValue)} → ${formatMetric(exposure.metric, exposure.newValue)}` : "触达变化不明显"}</span>
+        <span class="muted">${weak ? `${weak.metric}：${formatMetric(weak.metric, weak.oldValue)} → ${formatMetric(weak.metric, weak.newValue)}（${aiChangeTone(weak)}）` : "点击质量暂无明显风险"}</span>
+      </div>
+    `;
+  }).join("");
+  const countryRows = diagnosis.riskCountries.slice(0, 5).map((item) => `
+    <div style="display:grid; grid-template-columns:minmax(120px, 0.5fr) minmax(260px, 1.5fr); gap:18px; align-items:start; padding:12px 0; border-top:1px solid rgba(86,102,115,0.12);">
+      <strong>${item.country}</strong>
+      <span class="muted">${item.reasons.join("；")}</span>
+    </div>
   `).join("");
-  const projectCards = overview.projectCards.map((project) => {
-    const cells = OVERVIEW_HEALTH_SECTIONS.map((section) => {
-      const item = project.sections.find((entry) => entry.section === section.key);
+  return `
+    <div style="border:2px solid rgba(220,38,38,0.20); border-radius:22px; padding:26px 30px; margin:0 0 28px; background:linear-gradient(135deg, rgba(254,242,242,0.92), rgba(255,255,255,0.96)); box-shadow:0 18px 42px rgba(127,29,29,0.08);">
+      <div class="eyebrow" style="color:#dc2626;">问题、可能原因和优化建议</div>
+      <h3 style="margin:10px 0 18px; font-size:24px; line-height:1.5;">${diagnosis.conclusion}</h3>
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:18px; margin-bottom:22px;">
+        <div style="border:1px solid rgba(220,38,38,0.18); border-radius:18px; padding:18px 20px; background:#fff;">
+          <div class="eyebrow">目前看到的问题</div>
+          <ul style="margin:12px 0 0; padding-left:20px; line-height:1.85;">${diagnosis.evidence.slice(0, 4).map((item) => `<li>${item}</li>`).join("") || "<li>当前整体指标证据不足。</li>"}</ul>
+        </div>
+        <div style="border:1px solid rgba(37,99,235,0.18); border-radius:18px; padding:18px 20px; background:#fff;">
+          <div class="eyebrow">可以怎么优化</div>
+          <ul style="margin:12px 0 0; padding-left:20px; line-height:1.85;">${diagnosis.nextSteps.map((item) => `<li>${item}</li>`).join("")}</ul>
+        </div>
+      </div>
+      ${focusRows ? `<div style="margin-top:8px;"><div class="eyebrow">安装/卸载专项线索</div>${focusRows}</div>` : ""}
+      ${countryRows ? `<div style="margin-top:22px;"><div class="eyebrow">头部国家风险</div>${countryRows}</div>` : ""}
+    </div>
+  `;
+}
+
+function aiMetricChangeText(change) {
+  if (!change) return "暂无可比数据";
+  return `${formatMetric(change.metric, change.oldValue)} → ${formatMetric(change.metric, change.newValue)}（${aiFormatDelta(change)}，${aiChangeTone(change)}）`;
+}
+
+function aiQuestionCard(question, answer, tone = "normal") {
+  const palette = {
+    good: { color: "#0f766e", bg: "rgba(15,118,110,0.08)", border: "rgba(15,118,110,0.24)", label: "偏正向" },
+    risk: { color: "#dc2626", bg: "rgba(254,242,242,0.95)", border: "rgba(220,38,38,0.24)", label: "需关注" },
+    warn: { color: "#b45309", bg: "rgba(255,251,235,0.95)", border: "rgba(180,83,9,0.24)", label: "待确认" },
+    normal: { color: "#2563eb", bg: "rgba(37,99,235,0.06)", border: "rgba(37,99,235,0.18)", label: "自动分析" },
+  }[tone] || { color: "var(--accent)", bg: "#fff", border: "rgba(86,102,115,0.16)", label: "自动分析" };
+  return `
+    <article style="border:1px solid ${palette.border}; border-radius:18px; padding:18px 20px; background:${palette.bg}; min-height:150px;">
+      <div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start;">
+        <h3 style="margin:0; font-size:18px; line-height:1.45;">${question}</h3>
+        <span style="flex:0 0 auto; border-radius:999px; padding:5px 10px; background:#fff; color:${palette.color}; font-weight:800; font-size:12px;">${palette.label}</span>
+      </div>
+      <p class="muted" style="margin:14px 0 0; line-height:1.75;">${answer}</p>
+    </article>
+  `;
+}
+
+function aiRenderInputRecognition(analysis) {
+  const text = String(analysis.intent.rawText || "").trim();
+  if (!text) {
+    return `<p class="muted" style="font-size:13px; margin:10px 0 0;">DeepSeek 会自动结合整体指标、头部国家、通知文案/时机和功能模块分析；输入框可补充具体指标、国家、文案、功能或原因问题。</p>`;
+  }
+  if (!analysis.intent.supported) {
+    return `
+      <div style="margin-top:10px; border:1px solid rgba(220,38,38,0.20); border-radius:14px; padding:12px 14px; background:rgba(254,242,242,0.88); color:#991b1b; line-height:1.65;">
+        当前输入没有识别到看板里的指标、维度或常见分析意图。可以输入原表字段，例如“XXX指标”“XXX国家”“XXX版本”“D1数据变化”“XXX文案/时机/功能”。
+      </div>
+    `;
+  }
+  const parts = [];
+  if (analysis.intent.focusMetrics.length) parts.push(`指标：${analysis.intent.focusMetrics.slice(0, 6).join("、")}`);
+  if (analysis.intent.focusDimensions.length) parts.push(`维度：${analysis.intent.focusDimensions.join("、")}`);
+  if (analysis.intent.focusDimensionValues.length) {
+    parts.push(`维度值：${analysis.intent.focusDimensionValues.slice(0, 6).map((item) => `${item.field}=${item.value}`).join("、")}`);
+  }
+  if (analysis.intent.focusDays.length) parts.push(`天数：${analysis.intent.focusDays.join("、")}`);
+  return `
+    <div style="margin-top:10px; border:1px solid rgba(15,118,110,0.18); border-radius:14px; padding:12px 14px; background:rgba(15,118,110,0.06); color:var(--muted); line-height:1.65;">
+      ${parts.length ? `已识别重点，后面的分析会优先看 ${parts.join("；")}。` : "未识别到额外字段，DeepSeek 会按当前筛选下的整体数据自动判断分析重点。"}
+      <span style="display:block; margin-top:4px;">输入后会自动刷新分析；如果想立刻刷新，也可以点击“立即分析”。</span>
+    </div>
+  `;
+}
+
+function aiRenderChangeRows(changes, emptyColspan = 5) {
+  return changes.map((change) => `
+    <tr>
+      <th>${change.metric}</th>
+      <td>${formatMetric(change.metric, change.oldValue)}</td>
+      <td>${formatMetric(change.metric, change.newValue)}</td>
+      <td class="${aiChangeClass(change)}">${aiFormatDelta(change)}</td>
+      <td>${aiChangeTone(change)}</td>
+    </tr>
+  `).join("") || `<tr><td colspan="${emptyColspan}">当前筛选下没有足够数据。</td></tr>`;
+}
+
+function aiRenderNotificationCards(analysis) {
+  if (!analysis.intent.wantsNotification) return "";
+  const notificationChanges = aiSortChangesForList(analysis.changes
+    .filter((change) => aiNotificationMetrics(analysis.intent).includes(change.metric) && Math.abs(change.delta) >= 0.0001));
+  const improved = notificationChanges.filter((change) => aiChangeTone(change) === "变好");
+  const worsened = notificationChanges.filter((change) => aiChangeTone(change) === "变差");
+  const strongest = aiStrongestSummaryChange(improved);
+  const risk = aiStrongestSummaryChange(worsened);
+  const installHint = analysis.intent.focusTerms.length
+    ? `已识别关注点：${analysis.intent.focusTerms.join("、")}。`
+    : "未识别到具体文案关键词，会先看整体通知指标。";
+  return `
+    <div class="panel-title"><div><h2>整体通知指标</h2><p class="muted">先看新旧版本整体通知链路，再进入具体文案或时机。</p></div></div>
+    <div style="border:1px solid rgba(86,102,115,0.16); border-radius:20px; padding:24px 28px; margin-bottom:24px; background:rgba(255,255,255,0.72);">
+      <h3 style="margin:0 0 10px; line-height:1.5;">${improved.length > worsened.length ? "整体通知链路偏正向" : worsened.length > improved.length ? "整体通知链路偏谨慎" : "整体通知链路有升有降"}</h3>
+      <p class="muted" style="margin:0 0 18px; line-height:1.65;">
+        ${strongest ? `最大改善：${strongest.metric} ${formatMetric(strongest.metric, strongest.oldValue)} → ${formatMetric(strongest.metric, strongest.newValue)}（${aiFormatDelta(strongest)}）。` : "暂无明显改善。"}
+        ${risk ? `主要风险：${risk.metric} ${formatMetric(risk.metric, risk.oldValue)} → ${formatMetric(risk.metric, risk.newValue)}（${aiFormatDelta(risk)}）。` : "暂无明显风险。"}
+        ${installHint}
+      </p>
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap:24px;">
+        <div>
+          <div class="eyebrow">通知变好</div>
+          ${aiRenderChangeList(improved.slice(0, 6), "当前没有明显变好的通知指标。")}
+        </div>
+        <div>
+          <div class="eyebrow">通知变差</div>
+          ${aiRenderChangeList(worsened.slice(0, 6), "当前没有明显变差的通知指标。")}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function aiRenderTimingFocus(analysis) {
+  if (!analysis.intent.wantsNotification) return "";
+  if (!analysis.timingFocus.length) {
+    const target = analysis.intent.focusTerms.length ? analysis.intent.focusTerms.join("、") : "指定文案";
+    return `
+      <div class="warning-banner" style="margin-bottom:24px;">
+        <strong>专项分析：</strong>当前通知数据里没有匹配到“${target}”相关的通知文案或通知时机。可以换成数据表里的完整名称，或先到“通知文案对比”菜单确认名称。
+      </div>
+    `;
+  }
+  const blocks = analysis.timingFocus.map((item) => {
+    const sortedChanges = aiSortChangesForList(item.changes.filter((change) => Math.abs(change.delta) >= 0.0001));
+    const strongest = aiStrongestSummaryChange(sortedChanges);
+    const worsened = sortedChanges.filter((change) => aiChangeTone(change) === "变差");
+    const improved = sortedChanges.filter((change) => aiChangeTone(change) === "变好");
+    const verdict = worsened.length > improved.length
+      ? "专项表现偏弱"
+      : improved.length > worsened.length
+      ? "专项表现偏好"
+      : "专项表现混合";
+    return `
+      <div style="border:1px solid rgba(86,102,115,0.16); border-radius:20px; padding:24px 28px; background:rgba(255,255,255,0.72);">
+        <div class="eyebrow">${item.analysisType}</div>
+        <h3 style="margin:8px 0 10px;">${item.objectName}</h3>
+        <p class="muted" style="margin:0 0 18px; line-height:1.65;">${verdict}。${strongest ? `变化最大：${strongest.metric} ${formatMetric(strongest.metric, strongest.oldValue)} → ${formatMetric(strongest.metric, strongest.newValue)}（${aiFormatDelta(strongest)}，${aiChangeTone(strongest)}）。` : "暂无可比指标。"}</p>
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap:20px;">
+          <div>
+            <div class="eyebrow">变好</div>
+            ${aiRenderChangeList(improved.slice(0, 5), "暂无明显变好指标。")}
+          </div>
+          <div>
+            <div class="eyebrow">变差</div>
+            ${aiRenderChangeList(worsened.slice(0, 5), "暂无明显变差指标。")}
+          </div>
+        </div>
+      </div>
+    `;
+  }).join("");
+  return `
+    <div class="panel-title"><div><h2>指定文案/时机专项</h2><p class="muted">根据输入内容自动匹配通知文案或通知时机，例如“安装”“卸载”。</p></div></div>
+    <div style="display:flex; flex-direction:column; gap:22px; margin-bottom:28px;">${blocks}</div>
+  `;
+}
+
+function aiRenderTimingCountryFocus(analysis) {
+  if (!analysis.intent.wantsNotification || !analysis.timingCountryFocus.length) return "";
+  const blocks = analysis.timingCountryFocus.map((item) => {
+    const countryRows = item.countries.map((countryItem) => {
+      const change = countryItem.keyChange;
       return `
-        <div class="metric-mini">
-          <strong>${section.label}</strong>
-          <span>${item ? renderOverviewSectionValue(item) : "暂无"}</span>
-          <small>${item ? overviewStatusLabel(item.status) : "暂无"} · ${item ? `${item.validDays}/${item.totalDays} 天有效` : ""}</small>
+        <div style="display:grid; grid-template-columns:minmax(150px, 0.7fr) minmax(260px, 1.5fr) minmax(110px, auto); gap:16px; align-items:center; padding:12px 0; border-top:1px solid rgba(86,102,115,0.10);">
+          <strong>${countryItem.country}</strong>
+          <span class="muted">${change.metric}：${formatMetric(change.metric, change.oldValue)} → ${formatMetric(change.metric, change.newValue)}</span>
+          <strong style="text-align:right;">${aiFormatDelta(change)}</strong>
         </div>
       `;
     }).join("");
     return `
-      <article class="stat-card" style="padding:22px 24px;">
-        <div class="eyebrow">项目健康度</div>
-        <div class="stat-title" style="font-size:24px;">${project.project}</div>
-        <div class="stat-value">${overviewStatusLabel(project.status)}</div>
-        <div class="muted" style="margin:8px 0 14px;">主要问题：<strong>${project.diagnosis.issue}</strong></div>
-        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap:10px;">${cells}</div>
-      </article>
+      <div style="border:1px solid rgba(86,102,115,0.16); border-radius:20px; padding:24px 28px; background:rgba(255,255,255,0.72);">
+        <div class="eyebrow">头部国家专项</div>
+        <h3 style="margin:8px 0 18px;">${item.objectName}</h3>
+        ${countryRows || `<p class="muted">头部国家暂无可比专项数据。</p>`}
+      </div>
     `;
   }).join("");
-  const rankingRows = overview.abnormalRanking.map((project, index) => `
+  return `
+    <div class="panel-title"><div><h2>买量多国家里的专项差异</h2><p class="muted">只看样本达标的头部国家，判断指定文案是否在某些国家表现分化。</p></div></div>
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(520px, 1fr)); gap:24px; margin-bottom:30px;">${blocks}</div>
+  `;
+}
+
+function aiRenderChangeList(items, emptyText) {
+  if (!items.length) {
+    return `<p class="muted">${emptyText}</p>`;
+  }
+  return `
+    <div style="display:flex; flex-direction:column; gap:10px;">
+      ${items.map((change) => `
+        <div style="display:grid; grid-template-columns:minmax(180px, 1fr) minmax(220px, 1.2fr) minmax(90px, auto); gap:16px; align-items:center; padding:12px 0; border-top:1px solid rgba(86,102,115,0.10);">
+          <strong>${change.metric}</strong>
+          <span class="muted">${formatMetric(change.metric, change.oldValue)} → ${formatMetric(change.metric, change.newValue)}</span>
+          <strong style="text-align:right;">${aiFormatDelta(change)}</strong>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function aiRenderFeatureChangeList(items, emptyText) {
+  if (!items.length) {
+    return `<p class="muted">${emptyText}</p>`;
+  }
+  return `
+    <div style="display:flex; flex-direction:column; gap:10px;">
+      ${items.map((change) => `
+        <div style="display:grid; grid-template-columns:minmax(180px, 1fr) minmax(220px, 1.2fr) minmax(90px, auto); gap:16px; align-items:center; padding:12px 0; border-top:1px solid rgba(86,102,115,0.10);">
+          <strong>${change.object}</strong>
+          <span class="muted">${featureValue("D0", change.oldValue)} → ${featureValue("D0", change.newValue)}</span>
+          <strong style="text-align:right;">${aiFeatureFormatDelta(change)}</strong>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function aiRenderChangeBuckets(analysis) {
+  const qualityChanges = aiQualityChanges(analysis);
+  const improved = qualityChanges.filter((change) => aiChangeTone(change) === "变好").slice(0, 8);
+  const worsened = qualityChanges.filter((change) => aiChangeTone(change) === "变差").slice(0, 8);
+  return `
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap:24px; margin-bottom:30px;">
+      <div style="border:1px solid rgba(86,102,115,0.16); border-radius:18px; padding:22px 26px; background:rgba(255,255,255,0.68);">
+        <div class="eyebrow">变好指标</div>
+        <h3 style="margin:8px 0 18px;">${improved.length} 个重点改善</h3>
+        ${aiRenderChangeList(improved, "当前没有明显变好的质量指标。")}
+      </div>
+      <div style="border:1px solid rgba(86,102,115,0.16); border-radius:18px; padding:22px 26px; background:rgba(255,255,255,0.68);">
+        <div class="eyebrow">变差指标</div>
+        <h3 style="margin:8px 0 18px;">${worsened.length} 个需要关注</h3>
+        ${aiRenderChangeList(worsened, "当前没有明显变差的质量指标。")}
+      </div>
+    </div>
+  `;
+}
+
+function aiRenderCountryChangeBuckets(countryItem) {
+  const changes = aiSortChangesForList((countryItem?.changes || [])
+    .filter((change) => change.metric !== "新增用户数" && Math.abs(change.delta) >= 0.0001));
+  const improved = changes.filter((change) => aiChangeTone(change) === "变好").slice(0, 6);
+  const worsened = changes.filter((change) => aiChangeTone(change) === "变差").slice(0, 6);
+  return `
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap:24px; margin-bottom:28px;">
+      <div style="border:1px solid rgba(86,102,115,0.16); border-radius:18px; padding:22px 26px; background:rgba(255,255,255,0.68);">
+        <div class="eyebrow">该国家变好</div>
+        <h3 style="margin:8px 0 18px;">${improved.length} 个改善指标</h3>
+        ${aiRenderChangeList(improved, "该国家当前没有明显变好的质量指标。")}
+      </div>
+      <div style="border:1px solid rgba(86,102,115,0.16); border-radius:18px; padding:22px 26px; background:rgba(255,255,255,0.68);">
+        <div class="eyebrow">该国家变差</div>
+        <h3 style="margin:8px 0 18px;">${worsened.length} 个风险指标</h3>
+        ${aiRenderChangeList(worsened, "该国家当前没有明显变差的质量指标。")}
+      </div>
+    </div>
+  `;
+}
+
+function aiRenderOverallSection(analysis, context) {
+  return `
+    <section class="feature-overview" style="margin-bottom:26px;">
+      <div class="panel-title" style="margin-top:0;">
+        <div>
+          <h2>综合数据</h2>
+          <p class="muted">先看当前项目、版本和日期范围下的整体结论。</p>
+        </div>
+      </div>
+      ${appState.aiIterationText.trim() ? `<div class="muted" style="margin-bottom:10px;">迭代背景：${escapeAttr(appState.aiIterationText.trim())}</div>` : ""}
+      ${aiRenderSummaryPanel("总结", context.summaryBullets)}
+      ${aiRenderChangeBuckets(analysis)}
+      ${aiRenderNotificationCards(analysis)}
+      ${aiRenderTimingFocus(analysis)}
+    </section>
+  `;
+}
+
+function aiRenderCountrySection(analysis) {
+  const availableCountries = analysis.topCountries.filter((item) => item.valid);
+  const countries = availableCountries.length ? availableCountries : analysis.topCountries;
+  const selectedCountry = countries.some((item) => item.country === appState.aiCountry)
+    ? appState.aiCountry
+    : countries[0]?.country || "";
+  if (selectedCountry && selectedCountry !== appState.aiCountry) {
+    appState.aiCountry = selectedCountry;
+  }
+  const selected = countries.find((item) => item.country === selectedCountry);
+  const countryImproved = aiSortChangesForList((selected?.changes || []).filter((change) => aiChangeTone(change) === "变好"));
+  const countryWorsened = aiSortChangesForList((selected?.changes || []).filter((change) => aiChangeTone(change) === "变差"));
+  const strongest = aiStrongestSummaryChange((selected?.changes || [])
+    .filter((change) => change.metric !== "新增用户数" && Math.abs(change.delta) >= 0.0001));
+  const countrySummary = selected
+    ? [
+      `该国家有 ${countryImproved.length} 个指标变好、${countryWorsened.length} 个指标变差，${countryWorsened.length > countryImproved.length ? "整体需要重点关注" : countryImproved.length > countryWorsened.length ? "整体偏正向" : "表现比较分化"}。`,
+      strongest ? `变化最大的是 ${strongest.metric}：${formatMetric(strongest.metric, strongest.oldValue)} → ${formatMetric(strongest.metric, strongest.newValue)}（${aiFormatDelta(strongest)}，${aiChangeTone(strongest)}）。` : "暂无明显质量指标变化。",
+      "",
+      `${selected.country} 样本：旧版本 ${Math.round(selected.oldUsers).toLocaleString("zh-CN")}，新版本 ${Math.round(selected.newUsers).toLocaleString("zh-CN")}，样本${selected.valid ? "可纳入判断" : "偏少，只适合作为线索"}。`,
+    ]
+    : ["当前筛选下没有国家维度数据。"];
+  return `
+    <section class="feature-overview" style="margin-bottom:26px;">
+      <div class="panel-title" style="margin-top:0;">
+        <div>
+          <h2>国家数据</h2>
+          <p class="muted">选择一个头部国家，单独看这个国家的新旧版本变化。</p>
+        </div>
+      </div>
+      <div class="chip-row" style="margin-bottom:18px;">
+        ${countries.map((item) => `
+          <button type="button" class="chip ai-country-button ${item.country === selectedCountry ? "active" : ""}" data-country="${escapeAttr(item.country)}" style="cursor:pointer; border:0; ${item.country === selectedCountry ? "background:var(--accent); color:#fff;" : ""}">
+            ${item.country}
+          </button>
+        `).join("") || `<span class="chip">暂无国家数据</span>`}
+      </div>
+      ${aiRenderSummaryPanel(`${selectedCountry || "国家"}总结`, countrySummary)}
+      ${aiRenderCountryChangeBuckets(selected)}
+      ${aiRenderTimingCountryFocus(analysis)}
+    </section>
+  `;
+}
+
+function aiRenderFeatureFocus(analysis) {
+  if (!analysis.intent.wantsFeature) return "";
+  if (!analysis.featureFocus.length) {
+    return `
+      <section class="feature-overview" style="margin-bottom:26px;">
+        <div class="panel-title" style="margin-top:0;">
+          <div>
+            <h2>功能模块专项</h2>
+            <p class="muted">按分析类型切换查看功能漏斗或模块点击变化。</p>
+          </div>
+        </div>
+        <div class="warning-banner" style="margin-bottom:0;">
+          <strong>功能模块专项：</strong>当前项目、新旧版本和日期范围下没有匹配到可对比的功能模块数据。可以换一下日期或确认这两个版本是否都有 feature_export。
+        </div>
+      </section>
+    `;
+  }
+  const selectedType = analysis.featureFocus.some((item) => item.analysisType === appState.aiFeatureAnalysisType)
+    ? appState.aiFeatureAnalysisType
+    : analysis.featureFocus[0].analysisType;
+  if (selectedType !== appState.aiFeatureAnalysisType) {
+    appState.aiFeatureAnalysisType = selectedType;
+  }
+  const selected = analysis.featureFocus.find((item) => item.analysisType === selectedType) || analysis.featureFocus[0];
+  const strongest = selected.rankedChanges[0];
+  const improved = selected.improved.slice(0, 8);
+  const worsened = selected.worsened.slice(0, 8);
+  const isFunnel = String(selected.analysisType).includes("漏斗");
+  const verdict = selected.worsened.length > selected.improved.length
+    ? "负向变化更多，需要重点关注"
+    : selected.improved.length > selected.worsened.length
+    ? "正向变化更多，整体偏改善"
+    : "正负变化接近，需要看具体对象";
+  const summary = [
+    `${selected.analysisType} 当前 ${selected.improved.length} 个对象变好、${selected.worsened.length} 个对象变差，${verdict}。`,
+    strongest ? `变化最大的是 ${strongest.object}：${featureValue("D0", strongest.oldValue)} → ${featureValue("D0", strongest.newValue)}（${aiFeatureFormatDelta(strongest)}，${strongest.improved ? "变好" : "变差"}）。` : "暂无明显变化。",
+    isFunnel && selected.mainDrop ? `新版本主要流失步骤：${selected.mainDrop.from} → ${selected.mainDrop.to}，下降 ${featureValue("D0", selected.mainDrop.drop)}。` : "",
+    `样本：旧版本 ${Math.round(selected.oldUsers).toLocaleString("zh-CN")}，新版本 ${Math.round(selected.newUsers).toLocaleString("zh-CN")}。`,
+  ];
+  const rows = selected.rankedChanges.slice(0, 30).map((change) => `
     <tr>
-      <th>${index + 1}. ${project.project}</th>
-      <td>${overviewStatusLabel(project.status)}</td>
-      <td>${project.diagnosis.issue}</td>
-      <td>${project.diagnosis.reason}</td>
-      <td>${project.diagnosis.target}</td>
+      <td>${change.object}</td>
+      <td>${featureValue("D0", change.oldValue)}</td>
+      <td>${featureValue("D0", change.newValue)}</td>
+      <td class="${change.improved ? "best-cell" : "weak-cell"}">${aiFeatureFormatDelta(change)}</td>
+      <td>${change.improved ? "变好" : "变差"}</td>
     </tr>
   `).join("");
-  const countryBlock = renderOverviewCountryComparison(overview);
-  const versionBlock = renderOverviewVersionComparison(overview);
-  const recommendationCards = overview.abnormalRanking.slice(0, 3).map((project) => `
-    <article class="stat-card">
-      <div class="eyebrow">建议进入</div>
-      <div class="stat-title">${project.project} → ${project.diagnosis.target}</div>
-      <div class="muted">${project.diagnosis.reason}</div>
-    </article>
-  `).join("");
+  return `
+    <section class="feature-overview" style="margin-bottom:26px;">
+      <div class="panel-title" style="margin-top:0;">
+        <div>
+          <h2>功能模块专项</h2>
+          <p class="muted">选择一个分析类型，单独看该功能模块的新旧版本变化。</p>
+        </div>
+      </div>
+      <div class="chip-row" style="margin-bottom:18px;">
+        ${analysis.featureFocus.map((item) => `
+          <button type="button" class="chip ai-feature-button ${item.analysisType === selectedType ? "active" : ""}" data-feature-type="${escapeAttr(item.analysisType)}" style="cursor:pointer; border:0; ${item.analysisType === selectedType ? "background:var(--accent); color:#fff;" : ""}">
+            ${item.analysisType}
+          </button>
+        `).join("")}
+      </div>
+      ${aiRenderSummaryPanel(`${selected.analysisType}总结`, summary)}
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap:24px; margin-bottom:28px;">
+        <div style="border:1px solid rgba(86,102,115,0.16); border-radius:18px; padding:22px 26px; background:rgba(255,255,255,0.68);">
+          <div class="eyebrow">该模块变好</div>
+          <h3 style="margin:8px 0 18px;">${improved.length} 个改善对象</h3>
+          ${aiRenderFeatureChangeList(improved, "该模块当前没有明显变好的对象。")}
+        </div>
+        <div style="border:1px solid rgba(86,102,115,0.16); border-radius:18px; padding:22px 26px; background:rgba(255,255,255,0.68);">
+          <div class="eyebrow">该模块变差</div>
+          <h3 style="margin:8px 0 18px;">${worsened.length} 个风险对象</h3>
+          ${aiRenderFeatureChangeList(worsened, "该模块当前没有明显变差的对象。")}
+        </div>
+      </div>
+      <div class="table-wrap" style="margin-bottom:0;">
+        <table class="metric-table">
+          <thead><tr><th>分析对象</th><th>旧版本_D0</th><th>新版本_D0</th><th>变化</th><th>方向</th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="5">当前筛选下没有功能模块指标。</td></tr>`}</tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
 
-  host.innerHTML = `
-    <div class="${overviewStatusClass(topRisk?.status)}" style="margin-bottom:20px;">
-      <strong>优先关注：</strong>${topRisk ? `${topRisk.project}，${topIssue.issue}。${topIssue.reason}` : "当前暂无明显异常。"}
-      <div class="muted" style="margin-top:6px;">${periodText}。最优值统一采用当前筛选范围内表现最好的项目，差距和趋势均以百分点展示。</div>
+function aiBuildRecommendation(analysis) {
+  if (analysis.intent.wantsFeature && analysis.featureFocus.length) {
+    const risk = analysis.featureFocus
+      .flatMap((item) => item.worsened.map((change) => ({ item, change })))
+      .sort((a, b) => b.change.magnitude - a.change.magnitude)[0];
+    if (risk) {
+      return `建议先看 ${risk.item.analysisType} 里的 ${risk.change.object}：它是当前功能专项里最明显的负向变化。`;
+    }
+    return "功能模块整体没有明显负向项，可以继续看头部国家是否同步改善。";
+  }
+  const qualityChanges = analysis.changes.filter((change) => change.metric !== "新增用户数");
+  const uninstall = qualityChanges.find((change) => change.metric === "卸载率_D0");
+  const click = qualityChanges.find((change) => change.metric === "通知点击率_D0");
+  const show = qualityChanges.find((change) => change.metric === "通知展示率_D0");
+  const timingRisk = analysis.timingFocus
+    .flatMap((item) => item.changes.map((change) => ({ item, change })))
+    .filter(({ change }) => aiChangeTone(change) === "变差")
+    .sort((a, b) => b.change.magnitude - a.change.magnitude)[0];
+  if (analysis.intent.wantsNotification && timingRisk) {
+    return `建议先复盘 ${timingRisk.item.objectName}：${timingRisk.change.metric} 当前是主要负向点。如果这次迭代是“有触发就推送、没有限制”，需要特别观察展示次数是否上升但点击率或卸载率同步变差。`;
+  }
+  if (uninstall && aiChangeTone(uninstall) === "变差") {
+    return "建议先查卸载率升高来自哪些国家或版本入口，再判断是否和新逻辑触达频率、首日体验压力有关。";
+  }
+  if (show && click && aiChangeTone(show) === "变好" && aiChangeTone(click) === "变差") {
+    return "展示提升但点击下降，说明触达变多不一定带来有效点击，建议拆到通知文案/时机看是否有低意图触发。";
+  }
+  return "建议继续结合头部国家和专项文案看分化：如果整体正向但个别大国家变差，优先按国家灰度或调整触发限制。";
+}
+
+function aiLocalAnalysisKey(analysis) {
+  return JSON.stringify({
+    project: analysis.project,
+    oldVersion: analysis.oldVersion,
+    newVersion: analysis.newVersion,
+    dates: analysis.dates,
+    text: appState.aiIterationText || "",
+    directions: aiSelectedDirections(),
+  });
+}
+
+function aiCompactChange(change) {
+  if (!change) return null;
+  return {
+    metric: change.metric,
+    oldValue: formatMetric(change.metric, change.oldValue),
+    newValue: formatMetric(change.metric, change.newValue),
+    delta: aiFormatDelta(change),
+    direction: aiChangeTone(change),
+  };
+}
+
+function aiCompactCountry(countryItem) {
+  if (!countryItem) return null;
+  return {
+    country: countryItem.country,
+    sample: {
+      oldUsers: Math.round(countryItem.oldUsers || 0),
+      newUsers: Math.round(countryItem.newUsers || 0),
+      qualified: !!countryItem.valid,
+    },
+    positiveMetricCount: countryItem.positive || 0,
+    negativeMetricCount: countryItem.negative || 0,
+    strongestChange: aiCompactChange(countryItem.strongest),
+    metrics: aiCompactChangeList(countryItem.changes || [], 8),
+  };
+}
+
+function aiCompactTiming(item) {
+  if (!item) return null;
+  const allChanges = aiSortChangesForList(item.changes || []);
+  const rising = allChanges
+    .filter((change) => change.delta > 0)
+    .slice(0, 3)
+    .map(aiCompactChange)
+    .filter(Boolean);
+  const risks = allChanges
+    .filter((change) => aiChangeTone(change) === "变差")
+    .slice(0, 3)
+    .map(aiCompactChange)
+    .filter(Boolean);
+  return {
+    analysisType: item.analysisType,
+    objectName: item.objectName,
+    summary: item.summary,
+    risingMetrics: rising,
+    riskMetrics: risks,
+  };
+}
+
+function aiCompactFeature(item) {
+  if (!item) return null;
+  const improved = (item.improved || []).slice(0, 2).map((change) => ({
+    object: change.object,
+    oldValue: featureValue(change.day, change.oldValue),
+    newValue: featureValue(change.day, change.newValue),
+    delta: aiFeatureFormatDelta(change),
+    direction: "变好",
+  }));
+  const worsened = (item.worsened || []).slice(0, 2).map((change) => ({
+    object: change.object,
+    oldValue: featureValue(change.day, change.oldValue),
+    newValue: featureValue(change.day, change.newValue),
+    delta: aiFeatureFormatDelta(change),
+    direction: "变差",
+  }));
+  return {
+    analysisType: item.analysisType,
+    improved,
+    worsened,
+  };
+}
+
+function aiBuildOutputPreference(question, intent) {
+  const text = String(question || "");
+  return {
+    wantsTable: /表格|表|差值|具体|明细/i.test(text),
+    wantsCause: !!intent?.wantsCauseDiagnosis || /为什么|原因|排查|定位|怎么回事/i.test(text),
+    wantsCountryDetail: /国家|地区|美国|印度|墨西哥|巴基斯坦|孟加拉|头部|买量/i.test(text),
+    wantsNotificationDetail: !!intent?.wantsNotification,
+    wantsFeatureDetail: !!intent?.wantsFeature,
+  };
+}
+
+function aiBuildDeterministicRules() {
+  return [
+    "看板代码负责计算指标、加权、差值、方向和缺失；DeepSeek 只负责总结和解释。",
+    "新增用户数只作为样本背景，不参与变好或变差判断。",
+    "率类和人均类指标跨日期聚合时，已按新增用户数加权平均。",
+    "差值口径：项目间对比为第二个项目减第一个项目；版本对比为新版本减旧版本。",
+    "卸载率越低越好；留存、授权、展示、点击、转化率通常越高越好。",
+    "如果只提到 D0，就只分析 D0 指标；如果只提到 D1，就只分析 D1 指标。",
+    "如果用户点名国家、版本、广告组、文案、时机或功能模块，必须优先分析这些对象。",
+    "如果用户问国家但没点名，优先看新增用户数靠前的头部国家。",
+    "(not set) 默认不作为重点分析对象，除非用户明确点名。",
+    "如果 hasData 为 true，不能说对应对象数据缺失；如果 hasData 为 false，必须说明缺失的是哪个对象。",
+  ];
+}
+
+function aiCompactChangeList(changes, limit = 8) {
+  return (changes || []).slice(0, limit).map(aiCompactChange).filter(Boolean);
+}
+
+function aiBuildVersionComparisonTableRows(analysis) {
+  return (analysis.changes || []).map((change) => ({
+    range: "整体",
+    metric: change.metric,
+    baseObject: `${analysis.project} ${analysis.oldVersion}`,
+    baseValue: formatMetric(change.metric, change.oldValue),
+    compareObject: `${analysis.project} ${analysis.newVersion}`,
+    compareValue: formatMetric(change.metric, change.newValue),
+    delta: aiFormatDelta(change),
+    judgment: change.metric === "新增用户数"
+      ? "样本背景"
+      : aiChangeTone(change) === "变好"
+      ? "新版本更好"
+      : aiChangeTone(change) === "变差"
+      ? "旧版本更好"
+      : "基本持平",
+  })).slice(0, 80);
+}
+
+function aiProjectCompareTopCountries(projects, limit = 5) {
+  const reportDate = aiLatestReportDate();
+  const rows = (dashboardData.main.rows || []).filter((row) =>
+    projects.includes(row["项目代号"]) &&
+    (!reportDate || row["报表日期"] === reportDate) &&
+    row["国家"] &&
+    row["国家"] !== "全部" &&
+    row["国家"] !== "(not set)" &&
+    (!row["版本号"] || row["版本号"] === "全部") &&
+    (!row["广告组"] || row["广告组"] === "全部")
+  );
+  const countryMap = new Map();
+  rows.forEach((row) => {
+    countryMap.set(row["国家"], (countryMap.get(row["国家"]) || 0) + Number(row["新增用户数"] || 0));
+  });
+  return [...countryMap.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([country]) => country);
+}
+
+function aiBuildLocalAiContext(analysis) {
+  const qualityChanges = aiQualityChanges(analysis);
+  const improved = qualityChanges.filter((change) => aiChangeTone(change) === "变好");
+  const worsened = qualityChanges.filter((change) => aiChangeTone(change) === "变差");
+  const diagnosis = aiBuildCauseDiagnosis(analysis);
+  const question = String(appState.aiIterationText || "").trim() || "请分析这次版本迭代效果。";
+  const outputPreference = aiBuildOutputPreference(question, analysis.intent);
+  const recognized = {
+    focusDays: analysis.intent.focusDays,
+    strictDayFocus: analysis.intent.strictDayFocus,
+    focusMetrics: analysis.intent.focusMetrics,
+    focusDimensions: analysis.intent.focusDimensions,
+    focusDimensionValues: analysis.intent.focusDimensionValues,
+    requestedProjects: aiMentionedProjects(analysis.intent.rawText),
+    requestedVersions: aiMentionedVersions(analysis.intent.rawText, analysis.project),
+    requestedCountries: aiMentionedCountries(analysis.intent),
+  };
+  const commonScope = {
+    reportDate: aiLatestReportDate(),
+    selectedDirections: analysis.intent.selectedDirections,
+    recognized,
+    outputPreference,
+    deterministicRules: aiBuildDeterministicRules(),
+  };
+  const projectCompare = aiBuildProjectCompareContext(analysis);
+  if (projectCompare) {
+    return {
+      question,
+      scope: commonScope,
+      projectCompare,
+    };
+  }
+  return {
+    question,
+    scope: {
+      ...commonScope,
+      project: analysis.project,
+      oldVersion: analysis.oldVersion,
+      newVersion: analysis.newVersion,
+      firstVisitDates: analysis.dates,
+    },
+    ruleSummary: {
+      sample: {
+        oldUsers: Math.round(analysis.oldData.aggregated?.["新增用户数"] || 0),
+        newUsers: Math.round(analysis.newData.aggregated?.["新增用户数"] || 0),
+      },
+      improvedMetricCount: improved.length,
+      worsenedMetricCount: worsened.length,
+      improvedMetrics: aiCompactChangeList(improved, 8),
+      worsenedMetrics: aiCompactChangeList(worsened, 8),
+      biggestChanges: aiSortChangesByMagnitude(qualityChanges).slice(0, 8).map(aiCompactChange),
+      notificationSummary: analysis.notificationSummary,
+      recommendation: aiBuildRecommendation(analysis),
+    },
+    comparisonTableRows: aiBuildVersionComparisonTableRows(analysis),
+    topCountries: (analysis.topCountries || []).slice(0, 8).map(aiCompactCountry).filter(Boolean),
+    notificationOrTiming: (analysis.timingFocus || []).slice(0, 6).map(aiCompactTiming).filter(Boolean),
+    featureModules: (analysis.featureFocus || []).slice(0, 4).map(aiCompactFeature).filter(Boolean),
+    causeDiagnosis: {
+      conclusion: diagnosis.conclusion,
+      evidence: diagnosis.evidence.slice(0, 3),
+      nextSteps: diagnosis.nextSteps.slice(0, 2),
+      riskCountries: (diagnosis.riskCountries || []).slice(0, 5).map((item) => ({
+        country: item.country,
+        reasons: item.reasons,
+      })),
+      focusRisks: (diagnosis.focusRisks || []).slice(0, 3).map((item) => ({
+        analysisType: item.item.analysisType,
+        objectName: item.item.objectName,
+        strongestRisk: aiCompactChange(item.strongestRisk),
+      })),
+    },
+    projectCompare,
+  };
+}
+
+function aiBuildLocalAiPrompt(context) {
+  return `
+你是 FR 看板里的中文业务数据分析助手。请只根据下面 JSON 数据回答，不要编造看板里没有的数据。
+
+核心原则：
+1. JSON 中的 deterministicRules 是必须遵守的看板口径；不要自行更改差值、方向或缺失判断。
+2. 所有 metric.oldValue/newValue/delta/direction 都是看板代码已经计算好的结果，你只能引用和解释。
+3. 新增用户数是样本背景，不参与变好/变差判断。
+4. 率类和人均类跨日期聚合已经按新增用户数加权，不要重新计算。
+5. 卸载率越低越好；留存、授权、展示、点击、转化率通常越高越好。
+6. 如果用户问题提到某个指标、国家、版本、广告组、通知文案、通知时机或功能模块，要优先围绕它回答。
+7. 如果证据不足，要明确说“当前证据不足”，不要硬下结论。
+
+场景判断：
+1. 如果 projectCompare 不为空，说明用户正在做项目间对比，请优先回答 projectCompare 里的两个项目差异，不要改成版本迭代分析。
+2. 如果 projectCompare.countryComparisons 有内容，必须单独分析这些国家；hasData 为 true 的国家不能说数据缺失。
+3. 如果 recognized.focusDays 里只有 D0，且 strictDayFocus 为 true，只分析 D0 指标，不要额外展开 D1 或 D3。
+4. 如果 recognized.focusDays 里只有 D1，且 strictDayFocus 为 true，只分析 D1 指标，不要额外展开 D0。
+5. 如果用户问“为什么/原因/排查”，要按证据链组织：整体指标 → 头部国家 → 通知文案/时机 → 功能模块 → 可能原因 → 建议动作。
+6. 如果 notificationOrTiming 有内容，且用户提到通知、推送、文案、时机、安装或卸载，必须引用专项数据。
+7. 如果 featureModules 有内容，且用户提到功能、模块、流程、首次启动或漏斗，必须引用功能模块数据。
+8. 如果 projectCompare.featureProjectCompare.hasData 为 true，且用户提到功能、模块、流程、首次启动或漏斗，必须优先回答功能模块差异；公共通知指标只能作为补充背景，不能作为主要答案。
+
+输出要求：
+1. 用中文自然段输出，不要输出 JSON。
+2. 先用 1 句话直接回答用户问题。
+3. 再分为“主要差异”“重点风险”“可能原因”“建议动作”四段，每段最多 3 条。
+4. 如果用户要求表格、差值、具体明细，或 scope.outputPreference.wantsTable / projectCompare.outputPreference.wantsTable 为 true，必须先输出 Markdown 表格，不要只用文字。
+5. 表格至少包含：范围/国家、指标、${context.projectCompare?.baseProject || "旧对象"}、${context.projectCompare?.compareProject || "新对象"}、差值、判断。
+6. 如果 projectCompare.comparisonTableRows 或 comparisonTableRows 有内容，表格优先使用这些行，不要自己重新计算。
+7. 如果有多个国家，表格必须包含每个国家的行，不能只给整体。
+8. notification_risers 必须优先使用 notificationOrTiming.risingMetrics。
+9. 表格不要放进代码块。
+10. Markdown 表格必须一行一条记录，不要把整张表压成一行，也不要用“||”连接多行。
+11. 如果使用 1、2、3 分点，每一点必须单独换行，不要把多个编号写在同一行。
+12. 不要半句话结束。
+13. 绝对不要输出 JSON、数组或字段名式结构。
+
+JSON 数据：
+${JSON.stringify(context)}
+`.trim();
+}
+
+function aiFormatLocalJsonList(items) {
+  return Array.isArray(items)
+    ? items.filter(Boolean).map((item) => `- ${item}`).join("\n")
+    : "";
+}
+
+function aiFormatAnyLocalItem(item) {
+  if (item === null || item === undefined) return "";
+  if (typeof item === "string") return item;
+  if (typeof item !== "object") return String(item);
+  if (item.metric || item.oldValue || item.newValue || item.delta || item.direction) {
+    const pieces = [
+      item.metric,
+      item.oldValue !== undefined || item.newValue !== undefined ? `${item.oldValue ?? "NA"} → ${item.newValue ?? "NA"}` : "",
+      item.delta,
+      item.direction,
+    ].filter(Boolean);
+    return pieces.join("，");
+  }
+  if (item.country) {
+    const sample = item.sample
+      ? `样本 ${Number(item.sample.oldUsers || 0).toLocaleString("zh-CN")} → ${Number(item.sample.newUsers || 0).toLocaleString("zh-CN")}${item.sample.qualified === false ? "，样本偏少" : ""}`
+      : "";
+    const strongest = item.strongestChange ? `变化最大：${aiFormatAnyLocalItem(item.strongestChange)}` : "";
+    const counts = item.positiveMetricCount !== undefined || item.negativeMetricCount !== undefined
+      ? `变好 ${item.positiveMetricCount || 0} 个，变差 ${item.negativeMetricCount || 0} 个`
+      : "";
+    return [item.country, sample, counts, strongest].filter(Boolean).join("；");
+  }
+  if (item.mainAction || item.specificActions) {
+    return [item.mainAction, ...(Array.isArray(item.specificActions) ? item.specificActions : [])].filter(Boolean).join("；");
+  }
+  return Object.entries(item)
+    .map(([key, value]) => `${key}: ${Array.isArray(value) ? value.map(aiFormatAnyLocalItem).join("、") : aiFormatAnyLocalItem(value)}`)
+    .join("；");
+}
+
+function aiFormatAnyLocalList(items) {
+  return Array.isArray(items)
+    ? items.map(aiFormatAnyLocalItem).filter(Boolean).map((item) => `- ${item}`).join("\n")
+    : "";
+}
+
+function aiSectionBlock(title, body, tone = "normal") {
+  if (!body) return "";
+  const palette = {
+    answer: "border-color:rgba(37,99,235,0.22);background:linear-gradient(135deg,rgba(37,99,235,0.08),rgba(255,255,255,0.96));",
+    good: "border-color:rgba(15,118,110,0.20);background:rgba(15,118,110,0.06);",
+    risk: "border-color:rgba(180,83,9,0.22);background:rgba(245,158,11,0.08);",
+    normal: "border-color:rgba(86,102,115,0.14);background:#fff;",
+  };
+  return `
+    <section style="border:1px solid rgba(86,102,115,0.14); ${palette[tone] || palette.normal} border-radius:18px; padding:18px 20px;">
+      <div class="eyebrow" style="font-size:12px; letter-spacing:0; margin-bottom:8px;">${escapeAttr(title)}</div>
+      <div style="white-space:pre-wrap; line-height:1.85; color:var(--ink);">${escapeAttr(body)}</div>
+    </section>
+  `;
+}
+
+function aiFormatLocalAiJson(parsed) {
+  const sections = [];
+  if (parsed.direct_answer) {
+    sections.push(aiSectionBlock("直接结论", parsed.direct_answer, "answer"));
+  }
+  const overall = aiFormatAnyLocalList(parsed.overall);
+  if (overall) {
+    sections.push(aiSectionBlock("整体指标", overall, "normal"));
+  }
+  const risers = aiFormatAnyLocalList(parsed.notification_risers);
+  if (risers) {
+    sections.push(aiSectionBlock("上涨的文案/时机", risers, "good"));
+  }
+  if (parsed.retention_explanation) {
+    sections.push(aiSectionBlock("留存解释", parsed.retention_explanation, "risk"));
+  }
+  const countryItems = parsed.country_signals || parsed.topCountries || parsed.top_countries || [];
+  const countries = aiFormatAnyLocalList(countryItems);
+  if (countries) {
+    sections.push(aiSectionBlock("头部国家", countries, "normal"));
+  }
+  const recommendationItems = parsed.next_actions
+    || parsed.nextActions
+    || (parsed.recommendations
+      ? [parsed.recommendations.mainAction].concat(parsed.recommendations.specificActions || []).filter(Boolean)
+      : []);
+  const actions = aiFormatAnyLocalList(recommendationItems);
+  if (actions) {
+    sections.push(aiSectionBlock("建议动作", actions, "answer"));
+  }
+  if (!sections.length) {
+    return `<div data-ai-formatted="1" style="white-space:pre-wrap; line-height:1.9;">${escapeAttr(JSON.stringify(parsed, null, 2))}</div>`;
+  }
+  return `<div data-ai-formatted="1" style="display:grid; gap:14px;">${sections.join("")}</div>`;
+}
+
+function aiParseLocalAiJsonContent(content) {
+  const raw = String(content || "").trim();
+  const withoutFence = raw
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+  const firstBrace = withoutFence.indexOf("{");
+  const lastBrace = withoutFence.lastIndexOf("}");
+  const jsonText = firstBrace >= 0 && lastBrace > firstBrace
+    ? withoutFence.slice(firstBrace, lastBrace + 1)
+    : withoutFence;
+  const cleaned = jsonText
+    .replace(/\\_/g, "_")
+    .replace(/,\s*([}\]])/g, "$1");
+  return JSON.parse(cleaned);
+}
+
+function aiDedupeLocalText(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return "";
+  const parts = raw
+    .split(/(?<=。)|\n+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const seen = new Set();
+  const deduped = [];
+  parts.forEach((part) => {
+    const key = aiNormalizeText(part);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    deduped.push(part);
+  });
+  return deduped.join("\n");
+}
+
+function aiReadDeepSeekApiKey() {
+  if (appState.aiDeepSeekApiKey) return appState.aiDeepSeekApiKey;
+  if (window.FR_DEEPSEEK_API_KEY) return String(window.FR_DEEPSEEK_API_KEY || "").trim();
+  try {
+    return window.localStorage.getItem("frDeepSeekApiKey") || "";
+  } catch (error) {
+    return "";
+  }
+}
+
+function aiSaveDeepSeekApiKey(value) {
+  const key = String(value || "").trim();
+  if (!key) return;
+  appState.aiDeepSeekApiKey = key;
+  try {
+    window.localStorage.setItem("frDeepSeekApiKey", key);
+  } catch (error) {}
+}
+
+function aiRenderDeepSeekKeyInput() {
+  const hasKey = !!aiReadDeepSeekApiKey();
+  return `
+    <label style="display:block; margin:0;">
+      <span class="label-row" style="margin-bottom:8px;"><span>DeepSeek API Key</span></span>
+      <input
+        id="ai-deepseek-key"
+        type="password"
+        placeholder="${hasKey ? "已保存，可留空继续使用" : "请输入 DeepSeek API Key"}"
+        autocomplete="off"
+        style="width:100%; border:1px solid rgba(86,102,115,0.18); border-radius:14px; padding:12px 14px; font:inherit; background:#fff; min-height:46px;"
+      />
+    </label>
+  `;
+}
+
+function aiTopChangedText(changes, limit = 3) {
+  return aiSortChangesByMagnitude(changes)
+    .slice(0, limit)
+    .map((change) => `${change.metric}：${formatMetric(change.metric, change.oldValue)} → ${formatMetric(change.metric, change.newValue)}（${aiFormatDelta(change)}，${aiChangeTone(change)}）`)
+    .join("；");
+}
+
+function aiShouldUseProjectCompare(analysis) {
+  const text = String(analysis.intent.rawText || "");
+  const projects = aiMentionedProjects(text);
+  return projects.length >= 2 && /对比|比较|差距|差异|表现|所有数据|全部数据/i.test(text);
+}
+
+function aiProjectCompareMetrics(intent) {
+  const allMetrics = sortCompareMetrics((dashboardData.main.metrics || []).filter((metric) =>
+    COMPARE_METRICS.includes(metric)
+  ));
+  const focusedDayMetrics = aiFocusedDayMetrics(intent?.focusDays || []).filter((metric) => allMetrics.includes(metric));
+  if (intent?.strictDayFocus && focusedDayMetrics.length) {
+    return uniqueArray(["新增用户数"].concat(focusedDayMetrics));
+  }
+  const wantsAll = /所有|全部|全量|all/i.test(intent.rawText || "");
+  if (wantsAll || !(intent.focusMetrics || []).length) {
+    return allMetrics;
+  }
+  return uniqueArray(["新增用户数"].concat(intent.focusMetrics)).filter((metric) => allMetrics.includes(metric));
+}
+
+function aiProjectCompareResultHtml(params) {
+  const {
+    baseProject,
+    compareProject,
+    country,
+    dates,
+    changes,
+    usersChange,
+    compareBetter,
+    baseBetter,
+    strongest,
+  } = params;
+  const qualityChanges = changes.filter((change) => change.metric !== "新增用户数");
+  const compareBetterCount = compareBetter.length;
+  const baseBetterCount = baseBetter.length;
+  const directConclusion = compareBetterCount > baseBetterCount
+    ? `${compareProject} 在质量指标上整体更占优，但仍需重点确认弱项。`
+    : baseBetterCount > compareBetterCount
+    ? `${baseProject} 在质量指标上整体更占优，${compareProject} 的部分指标需要关注。`
+    : `两个项目整体表现比较接近，建议优先看差距最大的指标。`;
+  const topGapText = strongest.length
+    ? strongest.slice(0, 3).map((change) =>
+      `${change.metric}：${compareProject} 相对 ${baseProject} ${aiFormatDelta(change)}，${aiChangeTone(change)}`
+    ).join("；")
+    : "当前质量指标差距不明显。";
+  const metricRows = changes.map((change) => {
+    const tone = aiChangeTone(change);
+    const winner = change.metric === "新增用户数"
+      ? "样本规模"
+      : tone === "变好"
+      ? `${compareProject} 更好`
+      : tone === "变差"
+      ? `${baseProject} 更好`
+      : "基本持平";
+    const toneStyle = change.metric === "新增用户数"
+      ? "background:rgba(37,99,235,0.08);color:var(--accent);"
+      : tone === "变好"
+      ? "background:rgba(15,118,110,0.10);color:#0f766e;"
+      : tone === "变差"
+      ? "background:rgba(245,158,11,0.14);color:#92400e;"
+      : "background:rgba(86,102,115,0.08);color:var(--muted);";
+    return `
+      <tr>
+        <td style="font-weight:800;">${escapeAttr(change.metric)}</td>
+        <td>${escapeAttr(formatMetric(change.metric, change.oldValue))}</td>
+        <td>${escapeAttr(formatMetric(change.metric, change.newValue))}</td>
+        <td style="font-weight:800;">${escapeAttr(aiFormatDelta(change))}</td>
+        <td><span style="display:inline-flex; border-radius:999px; padding:5px 10px; font-weight:800; ${toneStyle}">${escapeAttr(winner)}</span></td>
+      </tr>
+    `;
+  }).join("");
+  const listBlock = (title, items, emptyText, tone) => {
+    const color = tone === "good" ? "#0f766e" : "#92400e";
+    const bg = tone === "good" ? "rgba(15,118,110,0.06)" : "rgba(245,158,11,0.08)";
+    const border = tone === "good" ? "rgba(15,118,110,0.18)" : "rgba(245,158,11,0.22)";
+    return `
+      <section style="border:1px solid ${border}; border-radius:18px; padding:18px 20px; background:${bg};">
+        <div class="eyebrow" style="font-size:12px; letter-spacing:0; color:${color};">${escapeAttr(title)}</div>
+        <h4 style="margin:8px 0 12px; font-size:20px;">${items.length ? `${items.length} 个指标` : "暂无明显指标"}</h4>
+        <div style="display:grid; gap:9px;">
+          ${items.length ? aiSortChangesForList(items).slice(0, 8).map((change) => `
+            <div style="display:flex; justify-content:space-between; gap:12px; border-top:1px solid rgba(86,102,115,0.10); padding-top:9px;">
+              <strong>${escapeAttr(change.metric)}</strong>
+              <span>${escapeAttr(aiFormatDelta(change))}</span>
+            </div>
+          `).join("") : `<p class="muted" style="margin:0;">${escapeAttr(emptyText)}</p>`}
+        </div>
+      </section>
+    `;
+  };
+  return `
+    <div data-ai-formatted="1" style="display:grid; gap:18px;">
+      <section style="border:1px solid rgba(37,99,235,0.20); border-radius:20px; padding:20px 22px; background:linear-gradient(135deg,rgba(37,99,235,0.08),rgba(255,255,255,0.96));">
+        <div class="eyebrow" style="font-size:12px; letter-spacing:0;">直接结论</div>
+        <h3 style="margin:8px 0 10px; font-size:23px;">${escapeAttr(directConclusion)}</h3>
+        <p class="muted" style="margin:0; line-height:1.75;">
+          口径：${escapeAttr(baseProject)} vs ${escapeAttr(compareProject)} / ${escapeAttr(country)} / ${escapeAttr(dates.join("、") || "无日期")}。
+          ${usersChange ? `新增用户：${escapeAttr(baseProject)} ${escapeAttr(formatMetric(usersChange.metric, usersChange.oldValue))}，${escapeAttr(compareProject)} ${escapeAttr(formatMetric(usersChange.metric, usersChange.newValue))}，差值 ${escapeAttr(aiFormatDelta(usersChange))}。` : ""}
+        </p>
+        <p style="margin:12px 0 0; line-height:1.75;"><strong>最大差距：</strong>${escapeAttr(topGapText)}</p>
+      </section>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:14px;">
+        ${listBlock(`${compareProject} 更好的指标`, compareBetter, "暂未看到明显领先项。", "good")}
+        ${listBlock(`${baseProject} 更好的指标`, baseBetter, "暂未看到明显领先项。", "risk")}
+      </div>
+      <section style="border:1px solid rgba(86,102,115,0.14); border-radius:20px; padding:18px 20px; background:#fff;">
+        <div class="eyebrow" style="font-size:12px; letter-spacing:0;">所有指标对比表</div>
+        <p class="muted" style="margin:6px 0 14px;">率类和人均类已按新增用户数加权；卸载率越低越好，其他质量指标通常越高越好。</p>
+        <div class="table-wrap">
+          <table class="metric-table">
+            <thead>
+              <tr>
+                <th>指标</th>
+                <th>${escapeAttr(baseProject)}</th>
+                <th>${escapeAttr(compareProject)}</th>
+                <th>差值</th>
+                <th>结论</th>
+              </tr>
+            </thead>
+            <tbody>${metricRows}</tbody>
+          </table>
+        </div>
+      </section>
     </div>
-    <div class="stats-grid" style="margin-bottom:22px;">${kpiCards}</div>
-    <div class="panel-title"><div><h2>项目健康度</h2><p class="muted">每个项目一张卡，先看健康状态，再看当前值、差距和趋势的解释入口。</p></div></div>
-    <div class="stats-grid" style="margin-bottom:24px;">${projectCards}</div>
-    <div class="panel-title"><div><h2>异常项目排名</h2><p class="muted">按健康风险排序，风险最高排最前。</p></div></div>
-    <div class="table-wrap" style="margin-bottom:24px;">
+  `;
+}
+
+function aiBuildFastProjectCompareAnswer(analysis) {
+  if (!aiShouldUseProjectCompare(analysis)) return "";
+  const projects = aiMentionedProjects(analysis.intent.rawText).slice(0, 2);
+  const [baseProject, compareProject] = projects;
+  const country = aiMentionedCountry(analysis.intent);
+  const dates = aiProjectCompareDates(projects, country);
+  const metrics = aiProjectCompareMetrics(analysis.intent);
+  const baseData = aiAggregateProject(baseProject, dates, country, metrics);
+  const compareData = aiAggregateProject(compareProject, dates, country, metrics);
+  if (!baseData.aggregated || !compareData.aggregated) {
+    return [
+      "直接结论：当前筛选口径下没有足够数据完成这次项目对比。",
+      `已识别项目：${projects.join(" vs ")}；国家：${country}；日期：${dates.join("、") || "无可用日期"}。`,
+      "建议先确认这两个项目在最新报表日期里是否都有该国家、全部版本、全部广告组的数据。"
+    ].join("\n\n");
+  }
+  const changes = metrics.map((metric) =>
+    aiMetricChange(metric, baseData.aggregated?.[metric], compareData.aggregated?.[metric])
+  ).filter(Boolean);
+  const qualityChanges = changes.filter((change) => change.metric !== "新增用户数" && Math.abs(change.delta) >= 0.0001);
+  const compareBetter = qualityChanges.filter((change) => aiChangeTone(change) === "变好");
+  const baseBetter = qualityChanges.filter((change) => aiChangeTone(change) === "变差");
+  const strongest = aiSortChangesByMagnitude(qualityChanges).slice(0, 6);
+  const usersChange = changes.find((change) => change.metric === "新增用户数");
+  return aiProjectCompareResultHtml({
+    baseProject,
+    compareProject,
+    country,
+    dates,
+    changes,
+    usersChange,
+    compareBetter,
+    baseBetter,
+    strongest,
+  });
+}
+
+function aiBuildProjectComparisonSlice(baseProject, compareProject, country, metrics) {
+  const dates = aiProjectCompareDates([baseProject, compareProject], country);
+  const baseData = aiAggregateProject(baseProject, dates, country, metrics);
+  const compareData = aiAggregateProject(compareProject, dates, country, metrics);
+  const changes = metrics.map((metric) =>
+    aiMetricChange(metric, baseData.aggregated?.[metric], compareData.aggregated?.[metric])
+  ).filter(Boolean);
+  const qualityChanges = changes.filter((change) => change.metric !== "新增用户数" && Math.abs(change.delta) >= 0.0001);
+  return {
+    country,
+    dates,
+    hasData: !!baseData.aggregated && !!compareData.aggregated,
+    sample: {
+      baseUsers: Math.round(baseData.aggregated?.["新增用户数"] || 0),
+      compareUsers: Math.round(compareData.aggregated?.["新增用户数"] || 0),
+    },
+    metrics: changes.map(aiCompactChange).filter(Boolean),
+    tableRows: changes.map((change) => ({
+      range: country === "全部" ? "整体" : country,
+      metric: change.metric,
+      baseObject: baseProject,
+      baseValue: formatMetric(change.metric, change.oldValue),
+      compareObject: compareProject,
+      compareValue: formatMetric(change.metric, change.newValue),
+      delta: aiFormatDelta(change),
+      judgment: change.metric === "新增用户数"
+        ? "样本背景"
+        : aiChangeTone(change) === "变好"
+        ? `${compareProject} 更好`
+        : aiChangeTone(change) === "变差"
+        ? `${baseProject} 更好`
+        : "基本持平",
+    })),
+    compareProjectBetter: aiSortChangesForList(qualityChanges.filter((change) => aiChangeTone(change) === "变好"))
+      .slice(0, 8)
+      .map(aiCompactChange)
+      .filter(Boolean),
+    baseProjectBetter: aiSortChangesForList(qualityChanges.filter((change) => aiChangeTone(change) === "变差"))
+      .slice(0, 8)
+      .map(aiCompactChange)
+      .filter(Boolean),
+  };
+}
+
+function aiBuildProjectCompareContext(analysis) {
+  if (!aiShouldUseProjectCompare(analysis)) return null;
+  const projects = aiMentionedProjects(analysis.intent.rawText).slice(0, 2);
+  const [baseProject, compareProject] = projects;
+  const metrics = aiProjectCompareMetrics(analysis.intent);
+  const outputPreference = aiBuildOutputPreference(analysis.intent.rawText, analysis.intent);
+  const requestedCountries = aiMentionedCountries(analysis.intent);
+  const primaryCountry = requestedCountries.length === 1 ? requestedCountries[0] : "全部";
+  const overall = aiBuildProjectComparisonSlice(baseProject, compareProject, primaryCountry, metrics);
+  const countrySeeds = requestedCountries.length
+    ? requestedCountries
+    : outputPreference.wantsCountryDetail
+    ? aiProjectCompareTopCountries(projects, 5)
+    : [];
+  const countryComparisons = uniqueArray(countrySeeds)
+    .filter((country) => country !== "全部")
+    .map((country) => aiBuildProjectComparisonSlice(baseProject, compareProject, country, metrics));
+  const featureProjectCompare = aiBuildFeatureProjectCompareContext(
+    baseProject,
+    compareProject,
+    overall.dates,
+    requestedCountries,
+    analysis.intent
+  );
+  const commonMetricTableRows = [overall].concat(countryComparisons)
+    .flatMap((item) => item.tableRows || [])
+    .slice(0, 80);
+  const preferredTableRows = featureProjectCompare?.hasData && analysis.intent.wantsFeature
+    ? featureProjectCompare.comparisonTableRows
+    : commonMetricTableRows;
+  return {
+    taskType: "项目间对比",
+    baseProject,
+    compareProject,
+    country: primaryCountry,
+    dates: overall.dates,
+    requestedCountries,
+    outputPreference,
+    focusDays: analysis.intent.focusDays || [],
+    strictDayFocus: !!analysis.intent.strictDayFocus,
+    metrics: overall.metrics,
+    compareProjectBetter: overall.compareProjectBetter,
+    baseProjectBetter: overall.baseProjectBetter,
+    countryComparisons,
+    featureProjectCompare,
+    commonMetricTableRows,
+    comparisonTableRows: preferredTableRows,
+  };
+}
+
+function aiBuildFastNotificationAnswer(analysis) {
+  if (!analysis.intent.wantsNotification) return "";
+  const notificationChanges = aiQualityChanges(analysis)
+    .filter((change) => aiNotificationMetrics(analysis.intent).includes(change.metric));
+  const notificationUp = notificationChanges.filter((change) => change.delta > 0);
+  const notificationRisk = notificationChanges.filter((change) => aiChangeTone(change) === "变差");
+  const retention = aiChangeByMetric(analysis.changes, "D1留存率");
+  const uninstall = aiChangeByMetric(analysis.changes, "卸载率_D0");
+  const riserItems = (analysis.timingFocus || [])
+    .map((item) => {
+      const rising = aiSortChangesByMagnitude((item.changes || []).filter((change) => change.delta > 0))[0] || null;
+      const risk = aiSortChangesByMagnitude((item.changes || []).filter((change) => aiChangeTone(change) === "变差"))[0] || null;
+      return {
+        item,
+        rising,
+        risk,
+        score: (rising?.magnitude || 0) + (item.analysisType === "通知文案" ? 1 : 0),
+      };
+    })
+    .filter((entry) => entry.rising)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5);
+  const countryRisks = (analysis.topCountries || [])
+    .filter((item) => item.valid && item.negative >= item.positive)
+    .slice(0, 4);
+  const sections = [];
+  sections.push(`直接结论：新版本通知指标确实整体上涨，但 D1 留存没有同步上涨；目前更像是触达变强带来了更多展示/点击，而不是带来了更高质量的次日回访。`);
+  sections.push(`整体通知指标：${notificationUp.length ? aiTopChangedText(notificationUp, 4) : "当前没有明显上涨的通知指标"}。${notificationRisk.length ? `同时要注意 ${aiTopChangedText(notificationRisk, 2)}。` : ""}`);
+  sections.push(`上涨的文案/时机：${riserItems.length ? riserItems.map((entry) => `${entry.item.analysisType}-${entry.item.objectName} 的 ${entry.rising.metric} 从 ${formatMetric(entry.rising.metric, entry.rising.oldValue)} 涨到 ${formatMetric(entry.rising.metric, entry.rising.newValue)}（${aiFormatDelta(entry.rising)}）`).join("；") : "当前没有找到可稳定点名的文案/时机上涨项"}。`);
+  sections.push(`为什么留存没涨：${retention ? `D1留存从 ${formatMetric(retention.metric, retention.oldValue)} 到 ${formatMetric(retention.metric, retention.newValue)}（${aiFormatDelta(retention)}，${aiChangeTone(retention)}）` : "D1留存当前缺少可比数据"}；${uninstall ? `同时卸载率从 ${formatMetric(uninstall.metric, uninstall.oldValue)} 到 ${formatMetric(uninstall.metric, uninstall.newValue)}（${aiFormatDelta(uninstall)}，${aiChangeTone(uninstall)}），说明新增触达可能有一定打扰成本。` : "当前卸载率证据不足。"}`);
+  sections.push(`头部国家：${countryRisks.length ? countryRisks.map((item) => `${item.country} 有 ${item.negative} 个风险指标`).join("；") : "头部国家暂时没有明显负向集中"}，建议优先看这些国家里上涨文案是否同时带来卸载率或 D1 留存压力。`);
+  sections.push(`建议动作：先把上涨最明显的安装/卸载类文案拆出来看展示次数、点击率和点击转化率是否同步提升；如果只是展示和点击变多但留存不涨，优先加频控、冷却时间或按国家灰度回退。`);
+  return sections.join("\n\n");
+}
+
+function aiShouldUseFastAnswer(analysis) {
+  const text = String(analysis.intent.rawText || "");
+  return analysis.intent.wantsNotification && (/留存|D1|文案|哪些|为什么|原因|没涨|没有提升/i.test(text) || analysis.intent.wantsCauseDiagnosis);
+}
+
+function aiProviderInfo(mode) {
+  if (mode === "deepseek") {
+    return {
+      providerName: "DeepSeek",
+      statusSuccess: "DeepSeek 总结",
+      statusError: "DeepSeek 暂不可用",
+      loadingText: "正在调用 DeepSeek 生成总结，通常需要几秒到十几秒。",
+      idleText: "点击“立即分析”后，会直接调用 DeepSeek；如果还没填写 API Key，请先在上方输入并保存。",
+      title: "基于当前筛选和问题的 DeepSeek 分析",
+      pill: "DeepSeek 分析",
+      errorPrefix: "DeepSeek 调用失败",
+    };
+  }
+  return {
+    providerName: "AI",
+    statusSuccess: "AI 总结",
+    statusError: "AI 暂不可用",
+    loadingText: "正在生成总结，通常需要几秒到十几秒。",
+    idleText: "点击“立即分析”后，会根据当前筛选生成总结。",
+    title: "基于当前筛选和问题的 AI 分析",
+    pill: "AI 分析",
+    errorPrefix: "AI 调用失败",
+  };
+}
+
+function aiParseMarkdownTableLine(line) {
+  const text = String(line || "").trim();
+  if (!text.includes("|")) return null;
+  const cells = text
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => cell.trim());
+  return cells.length >= 2 ? cells : null;
+}
+
+function aiIsMarkdownTableDivider(line) {
+  const cells = aiParseMarkdownTableLine(line);
+  return !!cells && cells.every((cell) => /^:?-{3,}:?$/.test(cell.replace(/\s/g, "")));
+}
+
+function aiRenderInlineMarkdown(text) {
+  return escapeAttr(text).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+}
+
+function aiRenderPlainTextBlock(lines) {
+  const html = [];
+  let paragraph = [];
+  let listItems = [];
+  let orderedItems = [];
+  const flushParagraph = () => {
+    const text = paragraph.join(" ").trim();
+    if (text) {
+      html.push(`<p style="margin:0 0 18px; line-height:1.9; font-size:17px; color:var(--ink);">${aiRenderInlineMarkdown(text)}</p>`);
+    }
+    paragraph = [];
+  };
+  const flushOrderedList = () => {
+    if (orderedItems.length) {
+      html.push(`
+        <ol style="margin:4px 0 24px 0; padding-left:0; list-style:none; display:grid; gap:14px; counter-reset:ai-step;">
+          ${orderedItems.map((item) => `
+            <li style="counter-increment:ai-step; position:relative; padding-left:38px; line-height:1.85; font-size:16px; color:var(--ink);">
+              <span style="position:absolute; left:0; top:0.32em; width:26px; height:26px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; background:rgba(37,99,235,0.10); color:var(--accent); font-weight:900; font-size:13px;">${item.index}</span>
+              ${aiRenderInlineMarkdown(item.text)}
+            </li>
+          `).join("")}
+        </ol>
+      `);
+    }
+    orderedItems = [];
+  };
+  const flushList = () => {
+    if (listItems.length) {
+      html.push(`
+        <ul style="margin:4px 0 22px 0; padding:0; list-style:none; display:grid; gap:12px;">
+          ${listItems.map((item) => `
+            <li style="position:relative; padding-left:22px; line-height:1.85; font-size:16px; color:var(--ink);">
+              <span style="position:absolute; left:0; top:0.72em; width:7px; height:7px; border-radius:999px; background:rgba(37,99,235,0.72);"></span>
+              ${aiRenderInlineMarkdown(item)}
+            </li>
+          `).join("")}
+        </ul>
+      `);
+    }
+    listItems = [];
+  };
+  const flushLists = () => {
+    flushOrderedList();
+    flushList();
+  };
+  lines.forEach((line) => {
+    const text = String(line || "").trim();
+    if (!text) {
+      flushParagraph();
+      flushLists();
+      return;
+    }
+    const headingMatch = text.match(/^\*\*([^*]+)\*\*[:：]?$/) || text.match(/^#{1,4}\s+(.+)$/);
+    if (headingMatch) {
+      flushParagraph();
+      flushLists();
+      html.push(`<h4 style="margin:24px 0 12px; font-size:19px; line-height:1.5; font-weight:900; color:var(--accent);">${escapeAttr(headingMatch[1])}</h4>`);
+      return;
+    }
+    const bulletMatch = text.match(/^[-*]\s*(.+)$/);
+    if (bulletMatch) {
+      flushParagraph();
+      flushOrderedList();
+      listItems.push(bulletMatch[1]);
+      return;
+    }
+    const orderedMatches = [...text.matchAll(/(?:^|\s)(\d+)[.、]\s+(.+?)(?=\s+\d+[.、]\s+|$)/g)];
+    if (orderedMatches.length >= 2 || (orderedMatches.length === 1 && text.match(/^\d+[.、]\s+/))) {
+      flushParagraph();
+      flushList();
+      orderedMatches.forEach((match) => {
+        orderedItems.push({ index: match[1], text: match[2].trim() });
+      });
+      return;
+    }
+    flushLists();
+    paragraph.push(text);
+  });
+  flushParagraph();
+  flushLists();
+  return html.filter(Boolean).join("");
+}
+
+function aiRenderMarkdownTable(headers, rows) {
+  if (!headers.length || !rows.length) return "";
+  return `
+    <div class="table-wrap" style="margin:10px 0 24px; overflow:auto;">
       <table class="metric-table">
-        <thead><tr><th>项目</th><th>健康状态</th><th>主要问题</th><th>可能原因</th><th>建议查看</th></tr></thead>
-        <tbody>${rankingRows}</tbody>
+        <thead>
+          <tr>${headers.map((cell) => `<th style="white-space:nowrap;">${aiRenderInlineMarkdown(cell)}</th>`).join("")}</tr>
+        </thead>
+        <tbody>
+          ${rows.map((row) => `
+            <tr>${headers.map((_, index) => `<td style="min-width:120px; vertical-align:top;">${aiRenderInlineMarkdown(row[index] || "")}</td>`).join("")}</tr>
+          `).join("")}
+        </tbody>
       </table>
     </div>
-    ${countryBlock}
-    ${versionBlock}
-    <div class="panel-title"><div><h2>建议进入的分析页</h2><p class="muted">数据概览只负责发现和定位，详细原因进入对应分析页。</p></div></div>
-    <div class="stats-grid">${recommendationCards}</div>
   `;
+}
+
+function aiNormalizeFlattenedMarkdownTables(text) {
+  const raw = String(text || "");
+  const tableStart = raw.search(/\|\s*(范围|国家|对象|指标|分析类型)\s*\|/);
+  if (tableStart < 0) {
+    return raw;
+  }
+  const prefix = raw.slice(0, tableStart).trim();
+  const rest = raw.slice(tableStart).trim();
+  const suffixMatch = rest.match(/\s+(?=(?:\*\*|#{1,4}\s*)?(主要差异|重点风险|可能原因|建议动作|总结|结论)(?:\*\*)?[:：]?)/);
+  const tableText = suffixMatch ? rest.slice(0, suffixMatch.index).trim() : rest;
+  const suffix = suffixMatch ? rest.slice(suffixMatch.index).trim() : "";
+  const parts = tableText.includes("||")
+    ? tableText.split(/\s*\|\|\s*/).map((part) => part.trim()).filter(Boolean)
+    : [];
+  const allCells = tableText
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => cell.trim())
+    .filter(Boolean);
+  let headers = parts.length ? aiParseMarkdownTableLine(parts[0]) : [];
+  if (!headers.length) {
+    const terminalHeaderIndex = allCells.findIndex((cell) => ["判断", "方向"].includes(cell));
+    const deltaHeaderIndex = allCells.findIndex((cell) => cell === "差值" || cell === "变化");
+    const width = terminalHeaderIndex >= 0
+      ? terminalHeaderIndex + 1
+      : deltaHeaderIndex >= 0
+      ? Math.min(deltaHeaderIndex + 2, allCells.length)
+      : 0;
+    headers = width ? allCells.slice(0, width) : [];
+  }
+  if (!headers || !headers.some((cell) => cell.includes("指标") || cell.includes("范围") || cell.includes("国家"))) {
+    return raw;
+  }
+  let rows = parts.length
+    ? parts.slice(1).map(aiParseMarkdownTableLine).filter((row) => row && row.length >= 2)
+    : [];
+  if (!rows.length) {
+    const width = headers.length;
+    const bodyCells = allCells.slice(width);
+    if (width >= 3 && bodyCells.length >= width) {
+      rows = [];
+      for (let index = 0; index + width <= bodyCells.length; index += width) {
+        rows.push(bodyCells.slice(index, index + width));
+      }
+    }
+  }
+  if (!rows.length) return raw;
+  const divider = `| ${headers.map(() => "---").join(" | ")} |`;
+  const normalizedTable = [
+    `| ${headers.join(" | ")} |`,
+    divider,
+    ...rows.map((row) => `| ${headers.map((_, index) => row[index] || "").join(" | ")} |`),
+  ].join("\n");
+  return [prefix, normalizedTable, suffix].filter(Boolean).join("\n\n");
+}
+
+function aiRenderTextWithMarkdownTables(text) {
+  const lines = aiNormalizeFlattenedMarkdownTables(text).split(/\r?\n/);
+  const blocks = [];
+  let buffer = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const headers = aiParseMarkdownTableLine(lines[index]);
+    if (headers && aiIsMarkdownTableDivider(lines[index + 1] || "")) {
+      blocks.push(aiRenderPlainTextBlock(buffer));
+      buffer = [];
+      index += 2;
+      const rows = [];
+      while (index < lines.length) {
+        const row = aiParseMarkdownTableLine(lines[index]);
+        if (!row) {
+          index -= 1;
+          break;
+        }
+        rows.push(row);
+        index += 1;
+      }
+      blocks.push(aiRenderMarkdownTable(headers, rows));
+      continue;
+    }
+    buffer.push(lines[index]);
+  }
+  blocks.push(aiRenderPlainTextBlock(buffer));
+  return `<div style="display:grid; gap:8px; max-width:1320px;">${blocks.filter(Boolean).join("")}</div>`;
+}
+
+function aiRenderLocalAiPanel(analysis, mode = "deepseek") {
+  const currentKey = aiLocalAnalysisKey(analysis);
+  const isStale = appState.aiLocalRequestKey && appState.aiLocalRequestKey !== currentKey;
+  const status = isStale ? "stale" : appState.aiLocalStatus;
+  const provider = aiProviderInfo(mode);
+  const statusLabel = {
+    idle: "待生成",
+    loading: "正在分析",
+    success: provider.statusSuccess,
+    error: provider.statusError,
+    stale: "条件已变化",
+  }[status] || "待生成";
+  const body = (() => {
+    if (status === "loading") {
+      return `<div class="empty-state">${provider.loadingText}</div>`;
+    }
+    if (status === "success" && appState.aiLocalAnswer) {
+      if (String(appState.aiLocalAnswer).includes("data-ai-formatted")) {
+        return appState.aiLocalAnswer;
+      }
+      return aiRenderTextWithMarkdownTables(appState.aiLocalAnswer);
+    }
+    if (status === "error") {
+      return `
+        <div class="empty-state">
+          ${provider.errorPrefix}：${escapeAttr(appState.aiLocalError || "未知错误")}<br/>
+          请检查 API Key、网络或稍后重试。
+        </div>
+      `;
+    }
+    if (status === "stale") {
+      return `<div class="empty-state">你已经修改了项目、版本、日期或问题，点击“立即分析”后会重新生成 AI 总结。</div>`;
+    }
+    return `<div class="empty-state">${provider.idleText}</div>`;
+  })();
+  return `
+    <div style="border:2px solid rgba(37,99,235,0.18); border-radius:24px; padding:24px 28px; margin:0 0 28px; background:linear-gradient(135deg, rgba(37,99,235,0.08), rgba(255,255,255,0.96)); box-shadow:0 18px 42px rgba(15,23,42,0.06);">
+      <div style="display:flex; justify-content:space-between; gap:16px; align-items:flex-start; margin-bottom:16px;">
+        <div>
+          <div class="eyebrow">${statusLabel}</div>
+          <h3 style="margin:8px 0 0; font-size:24px; line-height:1.45;">${provider.title}</h3>
+        </div>
+        <span class="pill">${provider.pill}</span>
+      </div>
+      ${body}
+    </div>
+  `;
+}
+
+async function aiRunDeepSeekAnalysis(analysis, requestKey) {
+  const apiKey = aiReadDeepSeekApiKey();
+  const context = aiBuildLocalAiContext(analysis);
+  const prompt = aiBuildLocalAiPrompt(context);
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 120000);
+  try {
+    if (!apiKey) {
+      throw new Error("还没有填写 DeepSeek API Key。");
+    }
+    const response = await fetch(DEEPSEEK_AI_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: DEEPSEEK_AI_MODEL,
+        stream: false,
+        temperature: 0.25,
+        max_tokens: 2600,
+        thinking: { type: "disabled" },
+        messages: [
+          {
+            role: "system",
+            content: "你是严谨的中文业务数据分析助手。只能基于输入数据分析，不能编造指标、国家、版本或项目。",
+          },
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+      }),
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || `HTTP ${response.status}`);
+    }
+    const json = await response.json();
+    const content = json?.choices?.[0]?.message?.content?.trim();
+    let answer = content;
+    try {
+      const parsed = aiParseLocalAiJsonContent(content);
+      answer = aiFormatLocalAiJson(parsed);
+    } catch (parseError) {
+      answer = /^\s*[{[]/.test(String(content || ""))
+        ? "模型返回了不完整的结构化结果，暂时无法展示成分析卡片。建议点击重新分析，或把问题写得更具体一些。"
+        : aiDedupeLocalText(content);
+    }
+    if (!answer) {
+      throw new Error("DeepSeek 没有返回正文，请稍后重试。");
+    }
+    if (appState.aiLocalRequestKey === requestKey) {
+      appState.aiLocalStatus = "success";
+      appState.aiLocalAnswer = answer;
+      appState.aiLocalError = "";
+      rerender();
+    }
+  } catch (error) {
+    if (appState.aiLocalRequestKey === requestKey) {
+      appState.aiLocalStatus = "error";
+      appState.aiLocalAnswer = "";
+      appState.aiLocalError = error?.name === "AbortError"
+        ? "DeepSeek 分析超过 120 秒，建议减少分析方向后再试。"
+        : (error?.message || String(error));
+      rerender();
+    }
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
+async function aiRunLocalAnalysis(analysis, requestKey) {
+  if (appState.aiAnalysisMode === "deepseek") {
+    return aiRunDeepSeekAnalysis(analysis, requestKey);
+  }
+  const context = aiBuildLocalAiContext(analysis);
+  const prompt = aiBuildLocalAiPrompt(context);
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 120000);
+  try {
+    const response = await fetch(LOCAL_AI_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: LOCAL_AI_MODEL,
+        stream: false,
+        think: false,
+        options: {
+          num_ctx: 4096,
+          num_predict: 220,
+          temperature: 0.25,
+        },
+        messages: [
+          {
+            role: "system",
+            content: "你是严谨的中文数据分析助手，必须只根据用户提供的数据作答。",
+          },
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+      }),
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || `HTTP ${response.status}`);
+    }
+    const json = await response.json();
+    const content = json?.message?.content?.trim();
+    let answer = content;
+    try {
+      const parsed = aiParseLocalAiJsonContent(content);
+      answer = aiFormatLocalAiJson(parsed);
+    } catch (parseError) {
+      answer = /^\s*[{[]/.test(String(content || ""))
+        ? "模型返回了不完整的结构化结果，暂时无法展示成分析卡片。建议点击重新分析，或把问题写得更具体一些。"
+        : aiDedupeLocalText(content);
+    }
+    if (!answer) {
+      throw new Error("模型没有返回正文，请稍后重试。");
+    }
+    if (appState.aiLocalRequestKey === requestKey) {
+      appState.aiLocalStatus = "success";
+      appState.aiLocalAnswer = answer;
+      appState.aiLocalError = "";
+      rerender();
+    }
+  } catch (error) {
+    if (appState.aiLocalRequestKey === requestKey) {
+      appState.aiLocalStatus = "error";
+      appState.aiLocalAnswer = "";
+      appState.aiLocalError = error?.name === "AbortError"
+        ? "本地模型分析超过 120 秒，建议减少分析方向后再试。"
+        : (error?.message || String(error));
+      rerender();
+    }
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
+function computeAiIterationAnalysis() {
+  ensureAiAssistantDefaults();
+  const intent = aiDetectIntent(appState.aiIterationText);
+  const mentionedProjects = aiMentionedProjects(intent.rawText);
+  const project = mentionedProjects.length === 1 ? mentionedProjects[0] : appState.aiProject;
+  const mentionedVersions = aiMentionedVersions(intent.rawText, project);
+  const oldVersion = mentionedVersions.length >= 2 ? mentionedVersions[0] : appState.aiOldVersion;
+  const newVersion = mentionedVersions.length >= 2 ? mentionedVersions[1] : appState.aiNewVersion;
+  const validDates = aiDateOptions(project, oldVersion, newVersion);
+  const selectedDates = appState.aiDates.filter((date) => validDates.includes(date));
+  const dates = (selectedDates.length ? selectedDates : aiDefaultDateSelection(validDates)).slice().sort();
+  const metrics = aiMetricList(intent);
+  const oldData = aiAggregateVersion(project, oldVersion, dates, "全部", metrics);
+  const newData = aiAggregateVersion(project, newVersion, dates, "全部", metrics);
+  const changes = metrics.map((metric) =>
+    aiMetricChange(metric, oldData.aggregated?.[metric], newData.aggregated?.[metric])
+  ).filter(Boolean);
+  const rankedChanges = changes.slice().sort((a, b) => b.magnitude - a.magnitude);
+  const qualityChanges = changes.filter((change) => change.metric !== "新增用户数" && Math.abs(change.delta) >= 0.0001);
+  const improvedCount = qualityChanges.filter((change) => change.improved).length;
+  const worsenedCount = qualityChanges.filter((change) => change.improved === false).length;
+  const topCountryCandidates = aiTopCountries(project, oldVersion, newVersion, dates, 10);
+  const topCountryUserMap = new Map(topCountryCandidates.map((item) => [item.country, item.users]));
+  const mentionedCountries = aiMentionedCountries(intent);
+  const topCountrySeeds = uniqueArray(mentionedCountries.concat(topCountryCandidates.map((item) => item.country)))
+    .slice(0, Math.max(5, mentionedCountries.length));
+  const topCountries = topCountrySeeds.map((country) => ({ country, users: topCountryUserMap.get(country) || 0 })).map((item) => {
+    const oldCountry = aiAggregateVersion(project, oldVersion, dates, item.country, metrics);
+    const newCountry = aiAggregateVersion(project, newVersion, dates, item.country, metrics);
+    const countryMetricCandidates = intent.wantsDayFocus
+      ? aiFocusedDayMetrics(intent.focusDays)
+      : ["D1留存率", "卸载率_D0", "通知授权率_D0", "通知展示率_D0", "通知点击率_D0"];
+    const countryChanges = countryMetricCandidates
+      .filter((metric) => metrics.includes(metric))
+      .map((metric) => aiMetricChange(metric, oldCountry.aggregated?.[metric], newCountry.aggregated?.[metric]))
+      .filter(Boolean);
+    const oldUsers = oldCountry.aggregated?.["新增用户数"] || 0;
+    const newUsers = newCountry.aggregated?.["新增用户数"] || 0;
+    const valid = Math.min(oldUsers, newUsers) >= 200;
+    const negative = countryChanges.filter((change) => change.metric !== "新增用户数" && change.improved === false).length;
+    const positive = countryChanges.filter((change) => change.metric !== "新增用户数" && change.improved).length;
+    const strongest = countryChanges.slice().sort((a, b) => b.magnitude - a.magnitude)[0] || null;
+    return {
+      ...item,
+      oldUsers,
+      newUsers,
+      valid,
+      positive,
+      negative,
+      strongest,
+      changes: countryChanges,
+    };
+  });
+  const timingObjects = aiTimingObjectsForIntent(project, oldVersion, newVersion, dates, intent);
+  const timingFocus = timingObjects.map((objectItem) =>
+    aiTimingChange(project, oldVersion, newVersion, dates, objectItem, "全部", intent)
+  );
+  const timingCountryFocus = timingObjects.slice(0, 2).map((objectItem) => ({
+    ...objectItem,
+    countries: topCountries
+      .filter((item) => item.valid)
+      .slice(0, 5)
+      .map((countryItem) => {
+        const timing = aiTimingChange(project, oldVersion, newVersion, dates, objectItem, countryItem.country, intent);
+        const primaryDay = intent.focusDays?.[0] || "D0";
+        const keyChange = timing.changes.find((change) => change.metric === `${primaryDay}通知点击率`)
+          || timing.changes.find((change) => change.metric === `${primaryDay}展示用户率`)
+          || timing.rankedChanges[0]
+          || null;
+        return { country: countryItem.country, keyChange, timing };
+      })
+      .filter((item) => item.keyChange),
+  }));
+  const featureFocus = aiBuildFeatureFocus(project, oldVersion, newVersion, dates, intent);
+  return {
+    project,
+    oldVersion,
+    newVersion,
+    dates,
+    intent,
+    metrics,
+    oldData,
+    newData,
+    changes,
+    rankedChanges,
+    improvedCount,
+    worsenedCount,
+    topCountries,
+    timingFocus,
+    timingCountryFocus,
+    featureFocus,
+    notificationSummary: aiBuildNotificationSummary(changes),
+  };
+}
+
+function renderAiIterationAssistant(host) {
+  const analysis = computeAiIterationAnalysis();
+  const projects = aiAvailableProjects();
+  const versions = aiVersionOptions(analysis.project);
+  const dates = aiDateOptions(analysis.project, analysis.oldVersion, analysis.newVersion);
+  const oldUsers = analysis.oldData.aggregated?.["新增用户数"] || 0;
+  const newUsers = analysis.newData.aggregated?.["新增用户数"] || 0;
+  const topChanges = analysis.rankedChanges.filter((change) => change.metric !== "新增用户数").slice(0, 6);
+  const qualityTop = topChanges;
+  const strongestText = qualityTop.length
+    ? `${qualityTop[0].metric} 变化最明显：${formatMetric(qualityTop[0].metric, qualityTop[0].oldValue)} → ${formatMetric(qualityTop[0].metric, qualityTop[0].newValue)}（${aiFormatDelta(qualityTop[0])}，${aiChangeTone(qualityTop[0])}）。`
+    : "当前没有足够的质量指标变化可判断。";
+  const recommendation = aiBuildRecommendation(analysis);
+
+  const hasGenerated = !!appState.aiHasGenerated;
+  const resultsHtml = hasGenerated ? aiRenderLocalAiPanel(analysis, "deepseek") : "";
+
+  host.innerHTML = `
+    <section style="margin-bottom:22px; border:1px solid rgba(37,99,235,0.14); border-radius:20px; padding:18px 20px; background:linear-gradient(135deg, rgba(37,99,235,0.05), rgba(255,255,255,0.98)); box-shadow:0 12px 30px rgba(15,23,42,0.04);">
+      <div style="display:grid; grid-template-columns:minmax(240px,0.8fr) minmax(320px,1.2fr); gap:18px; align-items:end;">
+        <div>
+          <div class="eyebrow">DeepSeek 设置</div>
+          <h3 style="margin:4px 0 6px; font-size:20px;">AI 分析需填写 API Key</h3>
+          <p class="muted" style="margin:0; font-size:14px; line-height:1.7;">Key 只保存在当前浏览器本地；已保存时可留空，直接分析。</p>
+        </div>
+        ${aiRenderDeepSeekKeyInput()}
+      </div>
+    </section>
+
+    <div class="feature-overview" style="margin-bottom:22px;">
+      <div class="panel-title" style="margin-bottom:18px;">
+        <div>
+          <div class="eyebrow">开始分析</div>
+          <h2 style="margin:4px 0 0;">输入你想问的问题</h2>
+          <p class="muted">请尽量写清楚项目、版本、国家、指标或你想排查的问题；如果没写具体方向，DeepSeek 会按整体指标、头部国家、通知专项和功能模块综合判断。</p>
+        </div>
+      </div>
+      <div style="display:grid; grid-template-columns: minmax(260px, 0.62fr) minmax(360px, 1.38fr); gap:16px;">
+        <label class="control-block" style="margin:0;">
+          <span class="label-row"><span>首次访问日期</span></span>
+          <div id="ai-dates" style="display:flex; flex-wrap:wrap; gap:8px; min-height:128px; border:1px solid rgba(86,102,115,0.18); border-radius:14px; padding:10px 12px; background:#fff; align-content:flex-start;">
+            ${dates.map((date) => `
+              <label style="display:inline-flex; align-items:center; gap:6px; border:1px solid rgba(86,102,115,0.18); border-radius:999px; padding:7px 10px; cursor:pointer; background:${analysis.dates.includes(date) ? "rgba(35, 99, 235, 0.10)" : "#fff"};">
+                <input class="ai-date-check" type="checkbox" value="${escapeAttr(date)}" ${analysis.dates.includes(date) ? "checked" : ""} style="margin:0;">
+                <span>${date}</span>
+              </label>
+            `).join("")}
+          </div>
+          <p class="muted" style="font-size:13px; margin:8px 0 0;">默认跳过最新日期，取前面最近 5 个日期；如需看最新数据，可手动勾选后点击“立即分析”。</p>
+        </label>
+        <label class="control-block" style="margin:0;">
+          <span class="label-row"><span>你想问的问题</span></span>
+          <textarea id="ai-iteration-text" rows="5" placeholder="例如：对比FRXXX和FRXXX在XXX国家的所有数据差距。" style="width:100%; min-height:128px; border:1px solid rgba(86,102,115,0.18); border-radius:14px; padding:12px 14px; resize:vertical; font:inherit; background:#fff;">${escapeAttr(appState.aiIterationText)}</textarea>
+          <div style="margin-top:10px;">
+            <div class="eyebrow" style="font-size:12px; letter-spacing:0; margin-bottom:8px;">输入示例</div>
+            <div style="display:flex; flex-wrap:wrap; gap:8px;">
+              ${[
+                "对比FRXXX和FRXXX在XXX国家的所有数据差距。",
+                "比较FRXXX和FRXXX的D0通知指标，帮我看哪个项目表现更好。",
+                "对比FRXXX项目的XXX版本和XXX版本，看看新版本哪些指标变好或变差。",
+                "这次XXX版本整体效果怎么样？哪些指标变好，哪些变差？",
+                "新版本XXX指标变差，XXX指标没有提升，帮我找可能原因。",
+                "新版本优化了XXX文案/XXX时机，帮我看整体通知指标和专项表现。",
+                "这次改了XXX功能，帮我看XXX漏斗哪里流失最大。"
+              ].map((item) => `<button type="button" class="ai-example-chip" data-example="${escapeAttr(item)}" style="border:1px solid rgba(37,99,235,0.18); border-radius:999px; padding:7px 10px; background:#fff; color:var(--ink); cursor:pointer; font:inherit; font-size:13px;">${item}</button>`).join("")}
+            </div>
+          </div>
+          ${aiRenderInputRecognition(analysis)}
+        </label>
+      </div>
+      <div style="display:flex; justify-content:flex-end; margin-top:14px;">
+        <button type="button" id="ai-generate" style="border:0; border-radius:999px; padding:12px 18px; background:var(--accent); color:white; font-weight:800; cursor:pointer;">立即分析</button>
+      </div>
+    </div>
+
+    ${resultsHtml}
+  `;
+  bindAiIterationAssistant();
+}
+
+function bindAiIterationAssistant() {
+  const dateChecks = document.querySelectorAll(".ai-date-check");
+  const countryButtons = document.querySelectorAll(".ai-country-button");
+  const featureButtons = document.querySelectorAll(".ai-feature-button");
+  const exampleButtons = document.querySelectorAll(".ai-example-chip");
+  const textArea = document.querySelector("#ai-iteration-text");
+  const generateButton = document.querySelector("#ai-generate");
+  const resetAiResult = () => {
+    appState.aiHasGenerated = false;
+    appState.aiLocalStatus = "idle";
+    appState.aiLocalAnswer = "";
+    appState.aiLocalError = "";
+    appState.aiLocalRequestKey = "";
+  };
+  dateChecks.forEach((node) => {
+    node.onchange = () => {
+      appState.aiDates = Array.from(document.querySelectorAll(".ai-date-check:checked")).map((option) => option.value);
+      resetAiResult();
+    };
+  });
+  countryButtons.forEach((node) => {
+    node.onclick = () => {
+      appState.aiCountry = node.dataset.country || "";
+      resetAiResult();
+      rerender();
+    };
+  });
+  featureButtons.forEach((node) => {
+    node.onclick = () => {
+      appState.aiFeatureAnalysisType = node.dataset.featureType || "";
+      resetAiResult();
+      rerender();
+    };
+  });
+  if (textArea) {
+    textArea.oninput = (event) => {
+      appState.aiIterationText = event.target.value;
+      resetAiResult();
+      window.clearTimeout(window.__frAiInputTimer);
+      window.__frAiInputTimer = window.setTimeout(() => {
+        window.__frAiRefocusInput = true;
+        rerender();
+      }, 800);
+    };
+  }
+  if (window.__frAiRefocusInput && textArea) {
+    window.__frAiRefocusInput = false;
+    textArea.focus();
+    textArea.setSelectionRange(textArea.value.length, textArea.value.length);
+  }
+  exampleButtons.forEach((node) => {
+    node.onclick = () => {
+      appState.aiIterationText = node.dataset.example || "";
+      resetAiResult();
+      if (textArea) {
+        textArea.value = appState.aiIterationText;
+      }
+      rerender();
+    };
+  });
+  if (generateButton) {
+    generateButton.onpointerdown = () => {
+      window.clearTimeout(window.__frAiInputTimer);
+      window.__frAiRefocusInput = false;
+    };
+    generateButton.onclick = (event) => {
+      event.preventDefault();
+      window.clearTimeout(window.__frAiInputTimer);
+      window.__frAiRefocusInput = false;
+      appState.aiIterationText = textArea?.value || appState.aiIterationText;
+      const deepSeekInput = document.querySelector("#ai-deepseek-key");
+      if (deepSeekInput?.value) {
+        aiSaveDeepSeekApiKey(deepSeekInput.value);
+        deepSeekInput.value = "";
+      }
+      const analysis = computeAiIterationAnalysis();
+      const requestKey = aiLocalAnalysisKey(analysis);
+      appState.aiHasGenerated = true;
+      appState.aiLocalAnswer = "";
+      appState.aiLocalError = "";
+      appState.aiLocalRequestKey = requestKey;
+      appState.aiLocalStatus = "loading";
+      rerender();
+      aiRunLocalAnalysis(analysis, requestKey);
+    };
+  }
+}
+
+function renderDataOverviewSummary(host) {
+  renderAiIterationAssistant(host);
 }
 
 function renderCompareSummary(analysis) {
   const host = document.querySelector("#compare-summary");
-  if (!analysis.filteredRows.length) {
-    host.innerHTML = `<div class="empty-state">当前筛选下没有可对比的数据。</div>`;
-    return;
-  }
   if (appState.activeWorkspace === "data_overview") {
     renderDataOverviewSummary(host);
+    return;
+  }
+  if (!analysis.filteredRows.length) {
+    host.innerHTML = `<div class="empty-state">当前筛选下没有可对比的数据。</div>`;
     return;
   }
   if (appState.activeWorkspace === "paid_country") {
@@ -6205,11 +9177,45 @@ function rerender() {
   renderTiming();
 }
 
+function formatMissingProjectSummary(missingByProject) {
+  const projectCodes = Object.keys(missingByProject || {}).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  return projectCodes.map((project) => {
+    const tables = missingByProject[project] || [];
+    return tables.length ? `${project}（${tables.join("、")}）` : project;
+  }).join("、");
+}
+
+function renderDataMeta() {
+  const meta = document.querySelector("#data-meta");
+  if (!meta) return;
+
+  meta.textContent = "";
+  const timeText = document.createElement("span");
+  timeText.textContent = `最近更新时间：${dashboardData.generatedAt}`;
+  meta.appendChild(timeText);
+
+  const syncStatus = dashboardData.syncStatus || {};
+  const missingText = formatMissingProjectSummary(syncStatus.missingByProject);
+  if (missingText) {
+    const missingBadge = document.createElement("span");
+    missingBadge.className = "meta-status warning";
+    missingBadge.textContent = `未更新项目：${missingText}`;
+    meta.appendChild(missingBadge);
+    return;
+  }
+
+  if (Array.isArray(syncStatus.expectedProjects) && syncStatus.expectedProjects.length) {
+    const okBadge = document.createElement("span");
+    okBadge.className = "meta-status ok";
+    okBadge.textContent = "全部项目已更新";
+    meta.appendChild(okBadge);
+  }
+}
+
 function bootstrap() {
   ensureDefaults();
   applyWorkspaceDefaults(appState.activeWorkspace);
-  document.querySelector("#data-meta").textContent =
-    `最近更新时间：${dashboardData.generatedAt}`;
+  renderDataMeta();
   document.addEventListener("click", (event) => {
     if (!event.target.closest(".multi-select-shell")) {
       document.querySelectorAll(".multi-select-shell.open").forEach((node) => node.classList.remove("open"));

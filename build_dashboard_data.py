@@ -34,6 +34,10 @@ RECOMMENDED_FUNNEL_METRICS = [
 ]
 
 
+def is_deprecated_d2_field(name: str) -> bool:
+    return "_D2" in name or name.startswith("D2")
+
+
 def metric_kind(name: str) -> str:
     if name == "新增用户数":
         return "count"
@@ -94,12 +98,16 @@ def read_csv_rows(path: Path, rename_map: dict[str, str] | None = None) -> tuple
         mapped_header = [rename_map.get(name, name) for name in original_header]
         header = []
         for name in mapped_header:
+            if is_deprecated_d2_field(name):
+                continue
             if name not in header:
                 header.append(name)
         rows = []
         for raw_row in reader:
             row = {}
             for original_name, normalized_name in zip(original_header, mapped_header):
+                if is_deprecated_d2_field(normalized_name):
+                    continue
                 value = parse_value(normalized_name, raw_row.get(original_name, ""))
                 if normalized_name not in row or (row[normalized_name] is None and value is not None):
                     row[normalized_name] = value
@@ -152,7 +160,12 @@ def fill_timing_conversion_rates(header: list[str], rows: list[dict]) -> tuple[l
     return header, rows
 
 
-def build_payload(common_csv_path: Path, timing_csv_path: Path, feature_csv_path: Path | None = None):
+def build_payload(
+    common_csv_path: Path,
+    timing_csv_path: Path,
+    feature_csv_path: Path | None = None,
+    sync_status: dict | None = None,
+):
     main_header, main_rows = read_csv_rows(common_csv_path, rename_map=METRIC_RENAME_MAP)
     if "广告组" not in main_header:
         insert_at = main_header.index("版本号") if "版本号" in main_header else len(MAIN_DIMENSIONS) - 1
@@ -184,6 +197,7 @@ def build_payload(common_csv_path: Path, timing_csv_path: Path, feature_csv_path
     return {
         "generatedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "workbookPath": f"{common_csv_path.name} | {timing_csv_path.name}",
+        "syncStatus": sync_status or {},
         "main": {
             "dimensions": MAIN_DIMENSIONS,
             "metrics": main_metrics,
@@ -230,12 +244,18 @@ def parse_args():
         default=OUTPUT_PATH,
         help="Path to the generated data.js file.",
     )
+    parser.add_argument(
+        "--sync-status",
+        default=None,
+        help="JSON metadata describing expected, included, and missing projects for this refresh.",
+    )
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
-    payload = build_payload(args.common, args.timing, args.feature)
+    sync_status = json.loads(args.sync_status) if args.sync_status else None
+    payload = build_payload(args.common, args.timing, args.feature, sync_status)
     timing_payload = payload.pop("timing")
     feature_payload = payload.pop("feature")
     args.output.write_text(
