@@ -3301,11 +3301,17 @@ function aiDetectIntent(text) {
   const mentionsNoLimitPush = /没有限制|无限制|不限制|有触发就.*推|触发就.*推|频率|频控|放开/i.test(rawText);
   let focusDays = uniqueArray((rawText.match(/D[0-4]/gi) || []).map((day) => day.toUpperCase()));
   const mentionsDayScope = focusDays.length > 0 && /D[0-4].{0,10}(数据|指标|差异|对比|表现|变化)|(数据|指标|差异|对比|表现|变化).{0,10}D[0-4]/i.test(rawText);
-  const strictDayFocus = focusDays.length > 0 && (
+  let strictDayFocus = focusDays.length > 0 && (
     /只|仅|单独|只看|只分析|只需要|不用看其他|不要.*D1|不要.*D0/i.test(rawText) || mentionsDayScope
   );
   if (hasDirection("d1") && !focusDays.includes("D1")) {
     focusDays = focusDays.concat("D1");
+  }
+  const mentionsRetentionOrLaterDay = /D[1-4]|留存|次日|次留|隔日/i.test(rawText);
+  const defaultNotificationD0Focus = wantsNotification && !focusDays.length && !mentionsRetentionOrLaterDay;
+  if (defaultNotificationD0Focus) {
+    focusDays = ["D0"];
+    strictDayFocus = true;
   }
   const focusMetrics = aiMatchedMetrics(rawText);
   const focusDimensions = aiMatchedDimensions(rawText);
@@ -3324,6 +3330,7 @@ function aiDetectIntent(text) {
     focusDimensions,
     focusDimensionValues,
     wantsDayFocus: hasDirection("d1") || strictDayFocus || (focusDays.length > 0 && !wantsCauseDiagnosis),
+    defaultNotificationD0Focus,
     wantsMetricFocus: focusMetrics.length > 0,
     asksCause,
     mentionsUninstallRisk,
@@ -4364,6 +4371,7 @@ function aiBuildDeterministicRules() {
     "差值口径：项目间对比为第二个项目减第一个项目；版本对比为新版本减旧版本。",
     "卸载率越低越好；留存、授权、展示、点击、转化率通常越高越好。",
     "如果只提到 D0，就只分析 D0 指标；如果只提到 D1，就只分析 D1 指标。",
+    "如果用户问通知、推送、文案或时机，但没有明确提到 D1、D3、留存或次日，默认只分析 D0 通知指标。",
     "如果用户点名国家、版本、广告组、文案、时机或功能模块，必须优先分析这些对象。",
     "如果用户问国家但没点名，优先看新增用户数靠前的头部国家。",
     "(not set) 默认不作为重点分析对象，除非用户明确点名。",
@@ -4425,6 +4433,7 @@ function aiBuildLocalAiContext(analysis) {
   const recognized = {
     focusDays: analysis.intent.focusDays,
     strictDayFocus: analysis.intent.strictDayFocus,
+    defaultNotificationD0Focus: !!analysis.intent.defaultNotificationD0Focus,
     focusMetrics: analysis.intent.focusMetrics,
     focusDimensions: analysis.intent.focusDimensions,
     focusDimensionValues: analysis.intent.focusDimensionValues,
@@ -4509,10 +4518,11 @@ function aiBuildLocalAiPrompt(context) {
 2. 如果 projectCompare.countryComparisons 有内容，必须单独分析这些国家；hasData 为 true 的国家不能说数据缺失。
 3. 如果 recognized.focusDays 里只有 D0，且 strictDayFocus 为 true，只分析 D0 指标，不要额外展开 D1 或 D3。
 4. 如果 recognized.focusDays 里只有 D1，且 strictDayFocus 为 true，只分析 D1 指标，不要额外展开 D0。
-5. 如果用户问“为什么/原因/排查”，要按证据链组织：整体指标 → 头部国家 → 通知文案/时机 → 功能模块 → 可能原因 → 建议动作。
-6. 如果 notificationOrTiming 有内容，且用户提到通知、推送、文案、时机、安装或卸载，必须引用专项数据。
-7. 如果 featureModules 有内容，且用户提到功能、模块、流程、首次启动或漏斗，必须引用功能模块数据。
-8. 如果 projectCompare.featureProjectCompare.hasData 为 true，且用户提到功能、模块、流程、首次启动或漏斗，必须优先回答功能模块差异；公共通知指标只能作为补充背景，不能作为主要答案。
+5. 如果 recognized.defaultNotificationD0Focus 或 projectCompare.defaultNotificationD0Focus 为 true，说明用户问的是通知类指标但没有指定 D1/留存，必须只围绕 D0 通知指标回答。
+6. 如果用户问“为什么/原因/排查”，要按证据链组织：整体指标 → 头部国家 → 通知文案/时机 → 功能模块 → 可能原因 → 建议动作。
+7. 如果 notificationOrTiming 有内容，且用户提到通知、推送、文案、时机、安装或卸载，必须引用专项数据。
+8. 如果 featureModules 有内容，且用户提到功能、模块、流程、首次启动或漏斗，必须引用功能模块数据。
+9. 如果 projectCompare.featureProjectCompare.hasData 为 true，且用户提到功能、模块、流程、首次启动或漏斗，必须优先回答功能模块差异；公共通知指标只能作为补充背景，不能作为主要答案。
 
 输出要求：
 1. 用中文自然段输出，不要输出 JSON。
@@ -4955,6 +4965,7 @@ function aiBuildProjectCompareContext(analysis) {
     outputPreference,
     focusDays: analysis.intent.focusDays || [],
     strictDayFocus: !!analysis.intent.strictDayFocus,
+    defaultNotificationD0Focus: !!analysis.intent.defaultNotificationD0Focus,
     metrics: overall.metrics,
     compareProjectBetter: overall.compareProjectBetter,
     baseProjectBetter: overall.baseProjectBetter,
