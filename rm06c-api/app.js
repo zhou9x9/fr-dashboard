@@ -22,6 +22,12 @@ const dashboardData = window.RM_API_DASHBOARD_DATA || {
     ],
     rows: [],
   },
+  playback: {
+    sourceFiles: [],
+    dimensions: ["报表日期", "项目代号", "首次访问日期", "国家", "版本号"],
+    metrics: [],
+    rows: [],
+  },
 };
 
 function expandRows(rows, fields) {
@@ -57,16 +63,41 @@ const eventParameterData = normalizePayloadRows(dashboardData.eventParameter || 
   ],
   rows: [],
 });
+const playbackData = normalizePayloadRows(dashboardData.playback || {
+  sourceFiles: [],
+  dimensions: ["报表日期", "项目代号", "首次访问日期", "国家", "版本号"],
+  metrics: [],
+  rows: [],
+});
 
 const MENU_API = "api";
+const MENU_PLAYBACK = "playback";
 const MENU_EVENT_PARAMETER = "event_parameter";
 const DIMENSION_FIELDS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号", "API", "type"];
+const PLAYBACK_FILTER_FIELDS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号"];
 const EVENT_PARAMETER_DIMENSION_FIELDS = ["报表日期", "项目代号", "首次访问日期", "版本号", "国家", "事件名", "type"];
 const EVENT_PARAMETER_FILTER_FIELDS = [...EVENT_PARAMETER_DIMENSION_FIELDS, "api"];
-const ALL_FILTER_FIELDS = [...new Set([...DIMENSION_FIELDS, ...EVENT_PARAMETER_FILTER_FIELDS])];
+const ALL_FILTER_FIELDS = [...new Set([...DIMENSION_FIELDS, ...PLAYBACK_FILTER_FIELDS, ...EVENT_PARAMETER_FILTER_FIELDS])];
 const RATE_METRICS = ["event_success_rate", "user_success_rate", "event_fail_rate", "user_fail_rate"].filter((metric) =>
   dashboardData.metrics.includes(metric)
 );
+const PLAYBACK_COUNT_FIELDS = [
+  "request_events",
+  "request_users",
+  "success_events",
+  "success_users",
+  "fail_events",
+  "fail_users",
+];
+const COUNT_FIELD_LABELS = {
+  new_users: "新增用户数",
+  request_events: "请求事件数",
+  request_users: "请求用户数",
+  success_events: "成功事件数",
+  success_users: "成功用户数",
+  fail_events: "失败事件数",
+  fail_users: "失败用户数",
+};
 const CHART_SPLIT_FIELDS = ["API", "国家", "版本号", "type"];
 const DETAIL_SPLIT_FIELDS = ["首次访问日期", "国家", "版本号", "type", "报表日期", "项目代号"];
 const API_CONTROL_CONFIGS = [
@@ -78,6 +109,14 @@ const API_CONTROL_CONFIGS = [
   { key: "API", label: "API", type: "filter", tall: true },
   { key: "type", label: "type", type: "filter" },
   { key: "splitDimensions", label: "拆分维度", type: "split" },
+  { key: "metrics", label: "关注指标", type: "metrics" },
+];
+const PLAYBACK_CONTROL_CONFIGS = [
+  { key: "报表日期", label: "报表日期", type: "filter" },
+  { key: "项目代号", label: "项目代号", type: "filter" },
+  { key: "首次访问日期", label: "首次访问日期", type: "filter", tall: true },
+  { key: "版本号", label: "版本号", type: "filter" },
+  { key: "国家", label: "国家", type: "filter" },
   { key: "metrics", label: "关注指标", type: "metrics" },
 ];
 const EVENT_PARAMETER_CONTROL_CONFIGS = [
@@ -165,7 +204,13 @@ function valueForField(row, field) {
 }
 
 function activeData() {
-  return state.activeMenu === MENU_EVENT_PARAMETER ? eventParameterData : dashboardData;
+  if (state.activeMenu === MENU_EVENT_PARAMETER) {
+    return eventParameterData;
+  }
+  if (state.activeMenu === MENU_PLAYBACK) {
+    return playbackData;
+  }
+  return dashboardData;
 }
 
 function activeRows() {
@@ -173,11 +218,23 @@ function activeRows() {
 }
 
 function activeDimensionFields() {
-  return state.activeMenu === MENU_EVENT_PARAMETER ? EVENT_PARAMETER_FILTER_FIELDS : DIMENSION_FIELDS;
+  if (state.activeMenu === MENU_EVENT_PARAMETER) {
+    return EVENT_PARAMETER_FILTER_FIELDS;
+  }
+  if (state.activeMenu === MENU_PLAYBACK) {
+    return PLAYBACK_FILTER_FIELDS.filter((field) => playbackData.dimensions.includes(field));
+  }
+  return DIMENSION_FIELDS;
 }
 
 function activeControlConfigs() {
-  return state.activeMenu === MENU_EVENT_PARAMETER ? EVENT_PARAMETER_CONTROL_CONFIGS : API_CONTROL_CONFIGS;
+  if (state.activeMenu === MENU_EVENT_PARAMETER) {
+    return EVENT_PARAMETER_CONTROL_CONFIGS;
+  }
+  if (state.activeMenu === MENU_PLAYBACK) {
+    return PLAYBACK_CONTROL_CONFIGS.filter((config) => config.type !== "filter" || playbackData.dimensions.includes(config.key));
+  }
+  return API_CONTROL_CONFIGS;
 }
 
 function uniqueValues(rows, field) {
@@ -270,7 +327,10 @@ function optionsFor(field, rows = activeRows()) {
 }
 
 function metricLabel(metric) {
-  return dashboardData.metricMeta[metric]?.label || metric;
+  return dashboardData.metricMeta[metric]?.label
+    || playbackData.metrics?.find((item) => item.key === metric)?.label
+    || COUNT_FIELD_LABELS[metric]
+    || metric;
 }
 
 function activeFilterFieldsByControlOrder() {
@@ -369,6 +429,7 @@ function controlSummary(config, selected, options) {
 function initDefaults() {
   const apiRows = dashboardData.rows || [];
   const eventRows = eventParameterData.rows || [];
+  const playbackRows = playbackData.rows || [];
   const reportDates = optionsFor("报表日期", apiRows);
   const projects = optionsFor("项目代号", apiRows);
   const firstVisitDates = optionsFor("首次访问日期", apiRows);
@@ -377,7 +438,9 @@ function initDefaults() {
   const apis = optionsFor("API", apiRows);
   const eventNames = optionsFor("事件名", eventRows);
   const eventApis = optionsFor("api", eventRows);
-  const types = sortValues("type", [...new Set([...uniqueValues(apiRows, "type"), ...uniqueValues(eventRows, "type")])]);
+  const types = sortValues("type", [
+    ...new Set([...uniqueValues(apiRows, "type"), ...uniqueValues(eventRows, "type"), ...uniqueValues(playbackRows, "type")]),
+  ]);
 
   state.filters["报表日期"] = reportDates.slice(-1);
   state.filters["项目代号"] = projects.slice(0, 1);
@@ -878,6 +941,77 @@ function renderDetailTable(rows) {
     : `${detailGroups.length} 个分组`;
 }
 
+function playbackCountFields(rows) {
+  return PLAYBACK_COUNT_FIELDS.filter((field) => rows.some((row) => Number.isFinite(Number(row[field]))));
+}
+
+function playbackRowsSorted(rows) {
+  return rows.slice().sort((a, b) => {
+    const dateDiff = String(b["首次访问日期"] || "").localeCompare(String(a["首次访问日期"] || ""), "zh-Hans-CN", { numeric: true });
+    if (dateDiff !== 0) {
+      return dateDiff;
+    }
+    const leftCountry = isAllValue(a["国家"]) ? "" : String(a["国家"] || "");
+    const rightCountry = isAllValue(b["国家"]) ? "" : String(b["国家"] || "");
+    const countryDiff = leftCountry.localeCompare(rightCountry, "zh-Hans-CN", { numeric: true });
+    if (countryDiff !== 0) {
+      return countryDiff;
+    }
+    return String(a["版本号"] || "").localeCompare(String(b["版本号"] || ""), "zh-Hans-CN", { numeric: true });
+  });
+}
+
+function renderPlaybackDetail(rows) {
+  const host = document.querySelector("#detail-table");
+  const countNode = document.querySelector("#detail-count");
+  const countFields = playbackCountFields(rows);
+  const rateMetrics = RATE_METRICS.filter((metric) => rows.some((row) => Number.isFinite(Number(row[metric]))));
+  const sortedRows = playbackRowsSorted(rows);
+  const visibleRows = sortedRows.slice(0, 1000);
+  const extraCount = sortedRows.length - visibleRows.length;
+  const context = ["项目代号", "国家", "版本号"].map(selectedTitlePart).join(" / ");
+  const headers = `
+    <th>首次访问日期</th>
+    <th>国家</th>
+    <th>版本号</th>
+    <th>新增用户数</th>
+    ${countFields.map((field) => `<th>${escapeHtml(metricLabel(field))}</th>`).join("")}
+    ${rateMetrics.map((metric) => `<th>${escapeHtml(metricLabel(metric))}</th>`).join("")}
+  `;
+  const body = visibleRows.map((row) => `
+    <tr>
+      <td>${escapeHtml(row["首次访问日期"] || "NA")}</td>
+      <td>${escapeHtml(row["国家"] || "NA")}</td>
+      <td>${escapeHtml(row["版本号"] || "NA")}</td>
+      <td class="number-cell">${formatCount(row.new_users)}</td>
+      ${countFields.map((field) => `<td class="number-cell">${formatCount(row[field])}</td>`).join("")}
+      ${rateMetrics.map((metric) => {
+        const activeClass = state.metrics.includes(metric) ? " is-focused" : "";
+        return `<td class="number-cell${activeClass}">${formatRate(row[metric])}</td>`;
+      }).join("")}
+    </tr>
+  `).join("");
+
+  host.innerHTML = `
+    <div class="detail-stack">
+      <article class="detail-group">
+        <div class="detail-group-head">
+          <h3>${escapeHtml(context)}</h3>
+          <span>${sortedRows.length.toLocaleString("zh-CN")} 条播放记录</span>
+        </div>
+        <div class="table-wrap inner-table-wrap">
+          <table>
+            <thead><tr>${headers}</tr></thead>
+            <tbody>${body || `<tr><td colspan="${rateMetrics.length + countFields.length + 4}" class="empty-table">当前筛选下暂无播放指标数据</td></tr>`}</tbody>
+          </table>
+        </div>
+      </article>
+      ${extraCount > 0 ? `<div class="empty-state compact">播放记录较多，已先显示前 1000 条，还有 ${extraCount} 条未展开。</div>` : ""}
+    </div>
+  `;
+  countNode.textContent = `${sortedRows.length.toLocaleString("zh-CN")} 条播放记录`;
+}
+
 function eventParameterFields() {
   const configuredFields = eventParameterData.parameterFields?.length
     ? eventParameterData.parameterFields
@@ -1030,10 +1164,16 @@ function renderMeta() {
 function renderAll() {
   renderMenu();
   renderControls();
+  const detailTitle = document.querySelector("#detail-title");
   const rows = filteredRows();
-  if (state.activeMenu === MENU_EVENT_PARAMETER) {
+  if (state.activeMenu === MENU_PLAYBACK) {
+    detailTitle.textContent = "播放指标";
+    renderPlaybackDetail(rows);
+  } else if (state.activeMenu === MENU_EVENT_PARAMETER) {
+    detailTitle.textContent = "明细数据";
     renderEventParameterDetail(rows);
   } else {
+    detailTitle.textContent = "明细数据";
     renderDetailTable(rows);
   }
   renderMeta();
