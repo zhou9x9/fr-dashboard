@@ -66,7 +66,7 @@ const AI_ANALYSIS_DIRECTIONS = [
   { key: "d1", label: "D1变化", note: "重点看 D1 相关指标" },
   { key: "cause", label: "原因排查", note: "输出可能原因和优化建议" },
 ];
-const AI_DEFAULT_ANALYSIS_DIRECTIONS = AI_ANALYSIS_DIRECTIONS.map((item) => item.key);
+const AI_DEFAULT_ANALYSIS_DIRECTIONS = [];
 const LOCAL_AI_MODEL = "qwen3:0.6b";
 const LOCAL_AI_ENDPOINT = "http://127.0.0.1:11434/api/chat";
 const DEEPSEEK_AI_MODEL = "deepseek-v4-flash";
@@ -3262,7 +3262,7 @@ const AI_TIMING_METRICS = [
 function aiSelectedDirections() {
   const allowed = AI_ANALYSIS_DIRECTIONS.map((item) => item.key);
   const selected = uniqueArray((appState.aiDirections || []).filter((key) => allowed.includes(key)));
-  return selected.length ? selected : AI_DEFAULT_ANALYSIS_DIRECTIONS.slice();
+  return selected;
 }
 
 function aiHasDirection(key) {
