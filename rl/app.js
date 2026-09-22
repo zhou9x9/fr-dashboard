@@ -51,6 +51,8 @@ const DEFAULT_TIMING_METRICS = [
   "D0人均点击次数",
   "D0通知点击转化率",
 ];
+const DEEPSEEK_AI_MODEL = "deepseek-v4-flash";
+const DEEPSEEK_AI_ENDPOINT = "https://api.deepseek.com/chat/completions";
 const SERIES_COLORS = ["#2563eb", "#0f766e", "#64748b", "#f59e0b"];
 const TIMING_SHORT_LABELS = {
   "监听到应用安装": ["应用", "安装"],
@@ -65,6 +67,10 @@ const TIMING_SHORT_LABELS = {
   "有扫描结果未恢复/清理": ["有结果", "未恢复"],
 };
 const WORKSPACES = {
+  ai_assistant: {
+    label: "AI数据分析助手",
+    note: "输入项目、版本、国家、指标或具体问题，DeepSeek 会基于看板已整理的数据输出分析结论。",
+  },
   paid_country: {
     label: "买量国家对比",
     note: "固定报表日期、项目、首次访问日期和版本后，重点看 top 10 国家用户数占比怎么变化，以及不同项目之间的买量结构差异。",
@@ -260,6 +266,14 @@ const appState = {
   lastTimingWorkspace: null,
   hasInitializedPaidCountryProjects: false,
   countryOptTrendMetric: null,
+  aiText: "",
+  aiDates: [],
+  aiDeepSeekApiKey: "",
+  aiStatus: "idle",
+  aiAnswer: "",
+  aiError: "",
+  aiRequestKey: "",
+  aiHasGenerated: false,
   workspaceMemory: {},
   sharedProjectDate: {
     single: { project: [], firstVisitDate: [] },
@@ -1243,15 +1257,17 @@ function renderWorkspaceChrome() {
   }
 
   const sections = workspaceSections();
+  const showAi = appState.activeWorkspace === "ai_assistant";
   const showFeature = isFeatureWorkspace();
   const showTiming = isTimingWorkspace();
-  const showCompare = !showTiming && !showFeature;
+  const showCompare = !showTiming && !showFeature && !showAi;
   const showFunnel = false;
   const showStructure = appState.activeWorkspace === "cross_project";
+  const showCompareSummary = showCompare || showAi;
   const showCompareDetails = showCompare && !["paid_country", "paid_adgroup"].includes(appState.activeWorkspace);
 
   setHidden(sections.compareControls, !showCompare);
-  setHidden(sections.compareSummary, !showCompare);
+  setHidden(sections.compareSummary, !showCompareSummary);
   setHidden(sections.compareDetails, !showCompareDetails);
   setHidden(sections.funnelControls, !showFunnel);
   setHidden(sections.funnelResult, !showFunnel);
@@ -1274,7 +1290,13 @@ function renderWorkspaceChrome() {
   const featureTitle = document.querySelector("#feature-title");
   const featureDesc = document.querySelector("#feature-desc");
 
-  if (appState.activeWorkspace === "paid_country") {
+  if (appState.activeWorkspace === "ai_assistant") {
+    compareControlsTitle.textContent = "AI分析控制台";
+    summaryTitle.textContent = "AI数据分析助手";
+    summaryDesc.textContent = "输入你想问的问题，DeepSeek 会基于 RL 看板当前数据生成结论。";
+    detailsTitle.textContent = "AI分析明细";
+    detailsDesc.textContent = "当前菜单以问答分析为主，普通明细表暂不展示。";
+  } else if (appState.activeWorkspace === "paid_country") {
     compareControlsTitle.textContent = "买量国家对比控制台";
     summaryTitle.textContent = "买量国家对比速览";
     summaryDesc.textContent = "先看 top 10 国家用户占比在时间维度上的变化，再看不同项目之间的横向差异。";
@@ -1982,8 +2004,352 @@ function aggregateInterpretation(context, metric) {
   return `${metric} 当前更适合作为加权总体差异来理解，不建议直接总结成“最好值”。`;
 }
 
+function aiReadDeepSeekApiKey() {
+  if (appState.aiDeepSeekApiKey) return appState.aiDeepSeekApiKey;
+  try {
+    return window.localStorage.getItem("rlDeepSeekApiKey") || "";
+  } catch {
+    return "";
+  }
+}
+
+function aiSaveDeepSeekApiKey(value) {
+  const key = String(value || "").trim();
+  if (!key) return;
+  appState.aiDeepSeekApiKey = key;
+  try {
+    window.localStorage.setItem("rlDeepSeekApiKey", key);
+  } catch {
+    // ignore localStorage failures
+  }
+}
+
+function aiOptions(field) {
+  return optionsFor(field).filter((item) => item !== "(not set)");
+}
+
+function aiDefaultDates() {
+  const dates = aiOptions("首次访问日期").filter(Boolean);
+  return dates.slice(0, -1).slice(-5);
+}
+
+function aiMentionedValues(text, values) {
+  const lower = String(text || "").toLowerCase();
+  return values.filter((value) => lower.includes(String(value).toLowerCase()));
+}
+
+function aiMetricCandidates(text) {
+  const raw = String(text || "");
+  const dayMatches = uniqueArray((raw.match(/D[0-4]/gi) || []).map((item) => item.toUpperCase()));
+  const mentionedMetrics = COMPARE_METRICS.filter((metric) => raw.includes(metric));
+  if (mentionedMetrics.length) return mentionedMetrics;
+  const notificationAsked = /通知|推送|文案|时机|点击|展示|授权/i.test(raw);
+  const focusDay = dayMatches.length ? dayMatches[0] : notificationAsked ? "D0" : "";
+  const base = [
+    "新增用户数",
+    "D1留存率",
+    "卸载率_D0",
+    "通知授权率_D0",
+    "通知展示率_D0",
+    "人均展示次数_D0",
+    "通知点击率_D0",
+    "人均点击次数_D0",
+    "常驻通知栏展示率_D0",
+    "常驻通知栏点击率_D0",
+  ].filter((metric) => COMPARE_METRICS.includes(metric));
+  if (!focusDay) return base;
+  return base.filter((metric) => metric === "新增用户数" || metric.includes(`_${focusDay}`) || metric === `${focusDay}留存率`);
+}
+
+function aiFilteredRows({ project, version, country, dates }) {
+  return dashboardData.main.rows.filter((row) =>
+    (!project || row["项目代号"] === project) &&
+    (!version || row["版本号"] === version) &&
+    (!country || country === "全部" || row["国家"] === country) &&
+    (!dates?.length || dates.includes(row["首次访问日期"])) &&
+    (!row["广告组"] || row["广告组"] === "全部")
+  );
+}
+
+function aiChange(metric, baseValue, compareValue, baseLabel, compareLabel) {
+  if (baseValue === null || baseValue === undefined || compareValue === null || compareValue === undefined) return null;
+  const delta = Number(compareValue) - Number(baseValue);
+  const lowerBetter = metric.includes("卸载率") || metric.includes("失败率");
+  const improved = metric === "新增用户数" ? null : lowerBetter ? delta < 0 : delta > 0;
+  const kind = dashboardData.metricMeta[metric]?.kind;
+  return {
+    metric,
+    base: baseLabel,
+    compare: compareLabel,
+    baseValue: formatMetric(metric, baseValue),
+    compareValue: formatMetric(metric, compareValue),
+    delta: kind === "rate" ? `${delta >= 0 ? "+" : ""}${(delta * 100).toFixed(2)}个百分点` : `${delta >= 0 ? "+" : ""}${delta.toFixed(2)}`,
+    judgment: metric === "新增用户数" ? "样本背景" : improved ? `${compareLabel}更好` : delta === 0 ? "基本持平" : `${baseLabel}更好`,
+    magnitude: Math.abs(delta),
+  };
+}
+
+function aiBuildRlContext() {
+  const question = String(appState.aiText || "").trim();
+  const projects = aiMentionedValues(question, aiOptions("项目代号"));
+  const countries = aiMentionedValues(question, aiOptions("国家"));
+  const project = projects[0] || aiOptions("项目代号")[0] || "";
+  const country = countries[0] || "全部";
+  const availableVersions = aiOptions("版本号").filter((item) => item !== "全部");
+  const versions = aiMentionedValues(question, availableVersions).slice(0, 2);
+  const defaultVersions = availableVersions.slice(-2);
+  const [baseVersion, compareVersion] = versions.length >= 2 ? versions : defaultVersions;
+  const dates = appState.aiDates.length ? appState.aiDates.slice() : aiDefaultDates();
+  const metrics = aiMetricCandidates(question);
+  const tableRows = [];
+  if (projects.length >= 2) {
+    const [baseProject, compareProject] = projects.slice(0, 2);
+    const baseAgg = aggregateRows(aiFilteredRows({ project: baseProject, version: "全部", country, dates }), metrics) || {};
+    const compareAgg = aggregateRows(aiFilteredRows({ project: compareProject, version: "全部", country, dates }), metrics) || {};
+    metrics.forEach((metric) => {
+      const item = aiChange(metric, baseAgg[metric], compareAgg[metric], baseProject, compareProject);
+      if (item) tableRows.push({ range: country, ...item });
+    });
+    return { taskType: "项目间对比", question, dates, country, baseObject: baseProject, compareObject: compareProject, metrics, tableRows };
+  }
+  const baseAgg = aggregateRows(aiFilteredRows({ project, version: baseVersion, country, dates }), metrics) || {};
+  const compareAgg = aggregateRows(aiFilteredRows({ project, version: compareVersion, country, dates }), metrics) || {};
+  metrics.forEach((metric) => {
+    const item = aiChange(metric, baseAgg[metric], compareAgg[metric], baseVersion, compareVersion);
+    if (item) tableRows.push({ range: country, ...item });
+  });
+  return { taskType: "版本对比", question, dates, country, project, baseObject: baseVersion, compareObject: compareVersion, metrics, tableRows };
+}
+
+function aiLocalKey(context) {
+  return JSON.stringify({ q: context.question, d: context.dates, b: context.baseObject, c: context.compareObject, country: context.country });
+}
+
+function aiInlineMarkdown(text) {
+  return escapeAttr(text).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+}
+
+function aiRenderAnswer(text) {
+  const lines = String(text || "").replace(/\r\n/g, "\n").split("\n");
+  const html = [];
+  let index = 0;
+  const isTableLine = (line) => /^\s*\|.+\|\s*$/.test(line);
+  const isDividerLine = (line) => /^\s*\|?[\s:|-]+\|[\s:|-]+\|?\s*$/.test(line);
+
+  while (index < lines.length) {
+    const line = lines[index].trim();
+    if (!line) {
+      index += 1;
+      continue;
+    }
+    if (isTableLine(line) && lines[index + 1] && isDividerLine(lines[index + 1])) {
+      const header = line.split("|").slice(1, -1).map((cell) => cell.trim());
+      index += 2;
+      const rows = [];
+      while (index < lines.length && isTableLine(lines[index])) {
+        rows.push(lines[index].split("|").slice(1, -1).map((cell) => cell.trim()));
+        index += 1;
+      }
+      html.push(`
+        <div class="table-shell" style="margin:10px 0 16px; overflow:auto;">
+          <table>
+            <thead><tr>${header.map((cell) => `<th>${aiInlineMarkdown(cell)}</th>`).join("")}</tr></thead>
+            <tbody>${rows.map((row) => `<tr>${row.map((cell) => `<td>${aiInlineMarkdown(cell)}</td>`).join("")}</tr>`).join("")}</tbody>
+          </table>
+        </div>
+      `);
+      continue;
+    }
+    if (/^#{1,4}\s+/.test(line)) {
+      html.push(`<h3 style="margin:18px 0 8px;">${aiInlineMarkdown(line.replace(/^#{1,4}\s+/, ""))}</h3>`);
+      index += 1;
+      continue;
+    }
+    if (/^\*\*[^*]+\*\*$/.test(line)) {
+      html.push(`<h3 style="margin:18px 0 8px;">${aiInlineMarkdown(line.replace(/^\*\*|\*\*$/g, ""))}</h3>`);
+      index += 1;
+      continue;
+    }
+    if (/^[-*]\s+/.test(line)) {
+      const items = [];
+      while (index < lines.length && /^[-*]\s+/.test(lines[index].trim())) {
+        items.push(lines[index].trim().replace(/^[-*]\s+/, ""));
+        index += 1;
+      }
+      html.push(`<ul style="margin:0 0 14px 22px; line-height:1.9;">${items.map((item) => `<li>${aiInlineMarkdown(item)}</li>`).join("")}</ul>`);
+      continue;
+    }
+    if (/^\d+\.\s+/.test(line)) {
+      const items = [];
+      while (index < lines.length && /^\d+\.\s+/.test(lines[index].trim())) {
+        items.push(lines[index].trim().replace(/^\d+\.\s+/, ""));
+        index += 1;
+      }
+      html.push(`<ol style="margin:0 0 14px 22px; line-height:1.9;">${items.map((item) => `<li>${aiInlineMarkdown(item)}</li>`).join("")}</ol>`);
+      continue;
+    }
+    const paragraph = [line];
+    index += 1;
+    while (
+      index < lines.length
+      && lines[index].trim()
+      && !/^#{1,4}\s+/.test(lines[index].trim())
+      && !/^\*\*[^*]+\*\*$/.test(lines[index].trim())
+      && !/^[-*]\s+/.test(lines[index].trim())
+      && !/^\d+\.\s+/.test(lines[index].trim())
+      && !isTableLine(lines[index].trim())
+    ) {
+      paragraph.push(lines[index].trim());
+      index += 1;
+    }
+    html.push(`<p style="margin:0 0 12px; line-height:1.9;">${aiInlineMarkdown(paragraph.join(" "))}</p>`);
+  }
+  return html.join("");
+}
+
+async function aiRunRlDeepSeek(context, requestKey) {
+  const apiKey = aiReadDeepSeekApiKey();
+  if (!apiKey) {
+    appState.aiStatus = "error";
+    appState.aiError = "还没有填写 DeepSeek API Key。";
+    rerender();
+    return;
+  }
+  const prompt = `你是 RL 看板里的中文业务数据分析助手。只根据 JSON 数据回答，不要编造。
+要求：
+1. 先用一句话直接回答用户问题。
+2. 如果 tableRows 有内容，必须先输出 Markdown 表格，列为：范围、指标、${context.baseObject}、${context.compareObject}、差值、判断。
+3. 然后分“主要差异”“重点风险”“建议动作”三段，每段最多 3 条。
+4. 新增用户数只作为样本背景，不判断好坏。
+5. 卸载率越低越好；留存、授权、展示、点击和人均次数通常越高越好。
+
+JSON：
+${JSON.stringify(context)}`;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 120000);
+    const response = await fetch(DEEPSEEK_AI_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: DEEPSEEK_AI_MODEL,
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.2,
+        max_tokens: 2200,
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!response.ok) throw new Error(await response.text());
+    const json = await response.json();
+    const answer = json?.choices?.[0]?.message?.content || "";
+    if (appState.aiRequestKey === requestKey) {
+      appState.aiStatus = "success";
+      appState.aiAnswer = answer || "DeepSeek 没有返回正文。";
+      appState.aiError = "";
+      rerender();
+    }
+  } catch (error) {
+    if (appState.aiRequestKey === requestKey) {
+      appState.aiStatus = "error";
+      appState.aiError = error?.name === "AbortError" ? "DeepSeek 分析超过 120 秒，请减少问题范围后重试。" : String(error?.message || error);
+      appState.aiAnswer = "";
+      rerender();
+    }
+  }
+}
+
+function renderRlAiAssistant(host) {
+  const context = aiBuildRlContext();
+  const dates = aiOptions("首次访问日期");
+  const resultHtml = appState.aiHasGenerated ? `
+    <section class="feature-overview" style="margin-top:18px;">
+      <div class="eyebrow">${appState.aiStatus === "success" ? "DeepSeek 总结" : appState.aiStatus === "loading" ? "正在分析" : "DeepSeek 暂不可用"}</div>
+      ${appState.aiStatus === "loading" ? `<p class="muted">正在调用 DeepSeek 生成分析，通常需要几秒到十几秒。</p>` : ""}
+      ${appState.aiStatus === "error" ? `<div class="warning-banner">${escapeAttr(appState.aiError || "未知错误")}</div>` : ""}
+      ${appState.aiStatus === "success" ? `<div style="line-height:1.85; font-size:15px;">${aiRenderAnswer(appState.aiAnswer)}</div>` : ""}
+    </section>
+  ` : "";
+  host.innerHTML = `
+    <div class="feature-overview">
+      <div class="panel-title" style="margin-bottom:18px;">
+        <div>
+          <div class="eyebrow">DeepSeek AI 分析</div>
+          <h2 style="margin:4px 0 0;">输入你想问的问题</h2>
+          <p class="muted">支持 RL 项目间对比、单项目版本对比、国家/通知指标定位。没有明确写 D1 时，通知类问题默认看 D0。</p>
+        </div>
+      </div>
+      <div style="display:grid; grid-template-columns:minmax(260px,0.62fr) minmax(360px,1.38fr); gap:16px;">
+        <label class="control-block" style="margin:0;">
+          <span class="label-row"><span>首次访问日期</span></span>
+          <div id="rl-ai-dates" style="display:flex; flex-wrap:wrap; gap:8px; min-height:128px; border:1px solid rgba(86,102,115,0.18); border-radius:14px; padding:10px 12px; background:#fff; align-content:flex-start;">
+            ${dates.map((date) => `
+              <label style="display:inline-flex; align-items:center; gap:6px; border:1px solid rgba(86,102,115,0.18); border-radius:999px; padding:7px 10px; cursor:pointer; background:${context.dates.includes(date) ? "rgba(35,99,235,0.10)" : "#fff"};">
+                <input class="rl-ai-date-check" type="checkbox" value="${escapeAttr(date)}" ${context.dates.includes(date) ? "checked" : ""} style="margin:0;">
+                <span>${date}</span>
+              </label>
+            `).join("")}
+          </div>
+          <p class="muted" style="font-size:13px; margin:8px 0 0;">默认跳过最新日期，取前面最近 5 个日期。</p>
+        </label>
+        <div>
+          <label class="control-block" style="margin:0 0 12px;">
+            <span class="label-row"><span>DeepSeek API Key</span></span>
+            <input id="rl-ai-key" type="password" placeholder="${aiReadDeepSeekApiKey() ? "已保存，可留空继续使用" : "请输入 DeepSeek API Key"}" style="width:100%; border:1px solid rgba(86,102,115,0.18); border-radius:14px; padding:12px 14px; font:inherit;">
+          </label>
+          <label class="control-block" style="margin:0;">
+            <span class="label-row"><span>你想问的问题</span></span>
+            <textarea id="rl-ai-text" rows="5" placeholder="例如：对比RL01B和RL01C的D0通知指标差异，要附带结论。" style="width:100%; min-height:128px; border:1px solid rgba(86,102,115,0.18); border-radius:14px; padding:12px 14px; resize:vertical; font:inherit;">${escapeAttr(appState.aiText)}</textarea>
+            <p class="muted" style="font-size:13px; margin:8px 0 0;">已识别：${escapeAttr(context.taskType)}；${escapeAttr(context.baseObject)} → ${escapeAttr(context.compareObject)}；范围：${escapeAttr(context.country)}。</p>
+          </label>
+        </div>
+      </div>
+      <div style="display:flex; justify-content:flex-end; margin-top:14px;">
+        <button type="button" id="rl-ai-generate" style="border:0; border-radius:999px; padding:12px 18px; background:var(--accent); color:white; font-weight:800; cursor:pointer;">立即分析</button>
+      </div>
+    </div>
+    ${resultHtml}
+  `;
+  document.querySelectorAll(".rl-ai-date-check").forEach((node) => {
+    node.onchange = () => {
+      appState.aiDates = Array.from(document.querySelectorAll(".rl-ai-date-check:checked")).map((item) => item.value);
+      appState.aiHasGenerated = false;
+    };
+  });
+  const textArea = document.querySelector("#rl-ai-text");
+  if (textArea) {
+    textArea.oninput = (event) => {
+      appState.aiText = event.target.value;
+      appState.aiHasGenerated = false;
+    };
+  }
+  const button = document.querySelector("#rl-ai-generate");
+  if (button) {
+    button.onclick = () => {
+      appState.aiText = textArea?.value || appState.aiText;
+      aiSaveDeepSeekApiKey(document.querySelector("#rl-ai-key")?.value || "");
+      const nextContext = aiBuildRlContext();
+      const requestKey = aiLocalKey(nextContext);
+      appState.aiHasGenerated = true;
+      appState.aiStatus = "loading";
+      appState.aiAnswer = "";
+      appState.aiError = "";
+      appState.aiRequestKey = requestKey;
+      rerender();
+      aiRunRlDeepSeek(nextContext, requestKey);
+    };
+  }
+}
+
 function renderCompareSummary(analysis) {
   const host = document.querySelector("#compare-summary");
+  if (appState.activeWorkspace === "ai_assistant") {
+    renderRlAiAssistant(host);
+    return;
+  }
   if (!analysis.filteredRows.length) {
     host.innerHTML = `<div class="empty-state">当前筛选下没有可对比的数据。</div>`;
     return;
