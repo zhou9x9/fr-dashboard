@@ -535,6 +535,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--recent-report-days", type=int, default=None, help="Read latest files for the most recent N report dates.")
     parser.add_argument("--include-report-dates", default="", help="Comma-separated report dates to always include.")
     parser.add_argument("--project-recent-report-days", default="", help="Comma-separated project:days rules, such as RM09B:5.")
+    parser.add_argument("--sync-status-json", default="", help="JSON sync status to embed in generated data.js.")
     return parser.parse_args()
 
 
@@ -599,6 +600,8 @@ def main() -> None:
         "metrics": [],
         "rows": [],
     }
+    if args.sync_status_json:
+        payload["syncStatus"] = json.loads(args.sync_status_json)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
         "window.RM_API_DASHBOARD_DATA = "
