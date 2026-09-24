@@ -2750,6 +2750,15 @@ function aiTextIncludes(rawText, value) {
   return needle.length >= 2 && aiNormalizeText(rawText).includes(needle);
 }
 
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function aiProjectCodeInText(rawText, project) {
+  const escapedProject = escapeRegExp(project);
+  return new RegExp(`(^|[^a-z0-9])${escapedProject}($|[^a-z0-9])`, "i").test(String(rawText || ""));
+}
+
 function aiMetricAliases(metric) {
   const aliases = [metric, String(metric).replace(/_/g, ""), String(metric).replace(/_D\d+$/i, "")];
   if (metric === "D1留存率") aliases.push("D1留存", "次日留存");
@@ -2799,7 +2808,10 @@ function aiMatchedDimensionValues(rawText) {
       .filter((value) => value && value !== "全部" && value !== "(not set)")
     );
     fieldValues.forEach((value) => {
-      if (aiTextIncludes(rawText, value)) {
+      const isMatch = field === "项目代号"
+        ? aiProjectCodeInText(rawText, value)
+        : aiTextIncludes(rawText, value);
+      if (isMatch) {
         values.push({ field, value });
       }
     });
@@ -2890,7 +2902,7 @@ function aiAggregateVersion(project, version, dates, country = "全部", metrics
 }
 
 function aiMentionedProjects(rawText) {
-  return aiAvailableProjects().filter((project) => aiTextIncludes(rawText, project));
+  return aiAvailableProjects().filter((project) => aiProjectCodeInText(rawText, project));
 }
 
 function aiMentionedVersions(rawText, project) {
