@@ -2033,8 +2033,20 @@ function aiDefaultDates() {
   return dates.slice(0, -1).slice(-5);
 }
 
-function aiMentionedValues(text, values) {
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function aiProjectCodeInText(text, project) {
+  const escapedProject = escapeRegExp(project);
+  return new RegExp(`(^|[^a-z0-9])${escapedProject}($|[^a-z0-9])`, "i").test(String(text || ""));
+}
+
+function aiMentionedValues(text, values, field = "") {
   const lower = String(text || "").toLowerCase();
+  if (field === "项目代号") {
+    return values.filter((value) => aiProjectCodeInText(text, value));
+  }
   return values.filter((value) => lower.includes(String(value).toLowerCase()));
 }
 
@@ -2091,7 +2103,7 @@ function aiChange(metric, baseValue, compareValue, baseLabel, compareLabel) {
 
 function aiBuildRlContext() {
   const question = String(appState.aiText || "").trim();
-  const projects = aiMentionedValues(question, aiOptions("项目代号"));
+  const projects = aiMentionedValues(question, aiOptions("项目代号"), "项目代号");
   const countries = aiMentionedValues(question, aiOptions("国家"));
   const project = projects[0] || aiOptions("项目代号")[0] || "";
   const country = countries[0] || "全部";
