@@ -2101,6 +2101,77 @@ function aiChange(metric, baseValue, compareValue, baseLabel, compareLabel) {
   };
 }
 
+function aiTimingRequestedAnalysisTypes(text) {
+  const raw = String(text || "");
+  const types = [];
+  if (/文案/.test(raw)) types.push("通知文案");
+  if (/时机|安装|卸载/.test(raw)) types.push("通知时机");
+  return types.length ? types : ["通知文案", "通知时机"];
+}
+
+function aiTimingObjectMatchesQuestion(text, objectName) {
+  const raw = String(text || "");
+  const objectText = String(objectName || "");
+  if (!objectText || objectText === "全部") return false;
+  const focusWords = raw.match(/[\u4e00-\u9fa5A-Za-z0-9]+/g) || [];
+  return focusWords.some((word) => word.length >= 2 && objectText.includes(word));
+}
+
+function aiTimingProjectRows({ project, country, dates, analysisType, objectName }) {
+  const latestReportDate = sortDimensionValues("报表日期", uniqueValues(dashboardData.timing.rows, "报表日期")).slice(-1)[0] || "";
+  let rows = dashboardData.timing.rows.filter((row) =>
+    row["项目代号"] === project &&
+    dates.includes(row["首次访问日期"]) &&
+    (!latestReportDate || row["报表日期"] === latestReportDate) &&
+    (!country || country === "全部" || row["国家"] === country) &&
+    (!analysisType || !row["分析类型"] || row["分析类型"] === analysisType) &&
+    (!objectName || row["通知时机"] === objectName)
+  );
+  if (rows.some((row) => row["版本号"] === "全部")) {
+    rows = rows.filter((row) => row["版本号"] === "全部");
+  }
+  return rows;
+}
+
+function aiTimingProjectCompareRows(baseProject, compareProject, country, dates, question) {
+  if (!/通知|推送|文案|时机|安装|卸载/i.test(question)) return [];
+  const metrics = DEFAULT_TIMING_METRICS.filter((metric) => dashboardData.timing.metrics.includes(metric));
+  const analysisTypes = aiTimingRequestedAnalysisTypes(question).filter((type) =>
+    dashboardData.timing.rows.some((row) => row["分析类型"] === type)
+  );
+  const tableRows = [];
+  analysisTypes.forEach((analysisType) => {
+    const sourceRows = dashboardData.timing.rows.filter((row) =>
+      [baseProject, compareProject].includes(row["项目代号"]) &&
+      dates.includes(row["首次访问日期"]) &&
+      (!country || country === "全部" || row["国家"] === country) &&
+      (!row["分析类型"] || row["分析类型"] === analysisType)
+    );
+    let objects = uniqueValues(sourceRows, "通知时机").filter((item) => item && item !== "全部");
+    const focusedObjects = objects.filter((item) => aiTimingObjectMatchesQuestion(question, item));
+    objects = (focusedObjects.length ? focusedObjects : objects).slice(0, 8);
+    objects.forEach((objectName) => {
+      const baseAgg = aggregateRows(aiTimingProjectRows({ project: baseProject, country, dates, analysisType, objectName }), metrics) || {};
+      const compareAgg = aggregateRows(aiTimingProjectRows({ project: compareProject, country, dates, analysisType, objectName }), metrics) || {};
+      metrics.forEach((metric) => {
+        const item = aiChange(metric, baseAgg[metric], compareAgg[metric], baseProject, compareProject);
+        if (item) {
+          tableRows.push({
+            range: country || "全部",
+            analysisType,
+            object: objectName,
+            ...item,
+            metric: `${analysisType}-${objectName}-${metric}`,
+          });
+        }
+      });
+    });
+  });
+  return tableRows
+    .sort((a, b) => b.magnitude - a.magnitude)
+    .slice(0, 80);
+}
+
 function aiBuildRlContext() {
   const question = String(appState.aiText || "").trim();
   const projects = aiMentionedValues(question, aiOptions("项目代号"), "项目代号");
@@ -2122,7 +2193,19 @@ function aiBuildRlContext() {
       const item = aiChange(metric, baseAgg[metric], compareAgg[metric], baseProject, compareProject);
       if (item) tableRows.push({ range: country, ...item });
     });
-    return { taskType: "项目间对比", question, dates, country, baseObject: baseProject, compareObject: compareProject, metrics, tableRows };
+    const timingDetailTableRows = aiTimingProjectCompareRows(baseProject, compareProject, country, dates, question);
+    return {
+      taskType: "项目间对比",
+      question,
+      dates,
+      country,
+      baseObject: baseProject,
+      compareObject: compareProject,
+      metrics,
+      commonMetricTableRows: tableRows,
+      timingDetailTableRows,
+      tableRows: timingDetailTableRows.length ? timingDetailTableRows : tableRows,
+    };
   }
   const baseAgg = aggregateRows(aiFilteredRows({ project, version: baseVersion, country, dates }), metrics) || {};
   const compareAgg = aggregateRows(aiFilteredRows({ project, version: compareVersion, country, dates }), metrics) || {};
@@ -2234,6 +2317,7 @@ async function aiRunRlDeepSeek(context, requestKey) {
 3. 然后分“主要差异”“重点风险”“建议动作”三段，每段最多 3 条。
 4. 新增用户数只作为样本背景，不判断好坏。
 5. 卸载率越低越好；留存、授权、展示、点击和人均次数通常越高越好。
+6. 如果 timingDetailTableRows 有内容，说明用户要看通知文案/通知时机专项差异，必须优先解释这些专项行；commonMetricTableRows 只能作为整体背景。
 
 JSON：
 ${JSON.stringify(context)}`;

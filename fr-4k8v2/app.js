@@ -3476,6 +3476,132 @@ function aiTimingChange(project, oldVersion, newVersion, dates, objectItem, coun
   };
 }
 
+function aiTimingRowsForProject(project, dates, options = {}) {
+  const reportDate = aiTimingReportDate();
+  const analysisType = options.analysisType || "";
+  const objectName = options.objectName || "";
+  const country = options.country || "全部";
+  let rows = (dashboardData.timing?.rows || []).filter((row) =>
+    row["项目代号"] === project &&
+    dates.includes(row["首次访问日期"]) &&
+    (!reportDate || row["报表日期"] === reportDate) &&
+    (!analysisType || !row["分析类型"] || row["分析类型"] === analysisType) &&
+    (!objectName || row["通知时机"] === objectName) &&
+    (!country || row["国家"] === country)
+  );
+  if (rows.some((row) => row["版本号"] === "全部")) {
+    rows = rows.filter((row) => row["版本号"] === "全部");
+  }
+  return rows;
+}
+
+function aiTimingAggregateProject(project, dates, options = {}, intent = null) {
+  const metrics = aiTimingMetrics(intent);
+  const rows = aiTimingRowsForProject(project, dates, options);
+  return {
+    rows,
+    aggregated: rows.length ? aggregateRows(rows, metrics) : null,
+  };
+}
+
+function aiTimingAnalysisTypesForProjectCompare(projects, dates, intent) {
+  if (!intent?.wantsNotification) return [];
+  const reportDate = aiTimingReportDate();
+  const rows = (dashboardData.timing?.rows || []).filter((row) =>
+    projects.includes(row["项目代号"]) &&
+    dates.includes(row["首次访问日期"]) &&
+    (!reportDate || row["报表日期"] === reportDate)
+  );
+  const availableTypes = uniqueValues(rows, "分析类型").filter(Boolean);
+  const requestedTypes = (intent.analysisTypes || []).filter((type) => availableTypes.includes(type));
+  return (requestedTypes.length ? requestedTypes : availableTypes).slice(0, 2);
+}
+
+function aiTimingProjectCompareItem(baseProject, compareProject, dates, analysisType, objectName, country, intent) {
+  const options = { analysisType, objectName, country };
+  const baseData = aiTimingAggregateProject(baseProject, dates, options, intent);
+  const compareData = aiTimingAggregateProject(compareProject, dates, options, intent);
+  const changes = aiTimingMetrics(intent)
+    .map((metric) => aiMetricChange(metric, baseData.aggregated?.[metric], compareData.aggregated?.[metric]))
+    .filter(Boolean);
+  const rankedChanges = changes.slice().sort((a, b) => b.magnitude - a.magnitude);
+  return {
+    analysisType,
+    objectName,
+    country,
+    dates,
+    hasData: !!baseData.aggregated && !!compareData.aggregated && !!changes.length,
+    sample: {
+      baseUsers: Math.round(baseData.aggregated?.["新增用户数"] || 0),
+      compareUsers: Math.round(compareData.aggregated?.["新增用户数"] || 0),
+    },
+    strongestChanges: rankedChanges.slice(0, 5).map(aiCompactChange).filter(Boolean),
+    comparisonTableRows: rankedChanges.slice(0, 8).map((change) => ({
+      range: country === "全部" ? "整体" : country,
+      analysisType,
+      object: objectName,
+      metric: `${analysisType}-${objectName}-${change.metric}`,
+      baseObject: baseProject,
+      baseValue: formatMetric(change.metric, change.oldValue),
+      compareObject: compareProject,
+      compareValue: formatMetric(change.metric, change.newValue),
+      delta: aiFormatDelta(change),
+      judgment: change.delta > 0 ? `${compareProject} 更高` : change.delta < 0 ? `${baseProject} 更高` : "基本持平",
+    })),
+    score: rankedChanges.reduce((sum, change) => sum + change.magnitude, 0),
+  };
+}
+
+function aiTimingObjectsForProjectCompare(projects, dates, analysisType, country, intent) {
+  const reportDate = aiTimingReportDate();
+  const rows = (dashboardData.timing?.rows || []).filter((row) =>
+    projects.includes(row["项目代号"]) &&
+    dates.includes(row["首次访问日期"]) &&
+    (!reportDate || row["报表日期"] === reportDate) &&
+    (!analysisType || !row["分析类型"] || row["分析类型"] === analysisType) &&
+    (!country || row["国家"] === country) &&
+    (!row["版本号"] || row["版本号"] === "全部")
+  );
+  const values = uniqueValues(rows, "通知时机").filter((value) => value && value !== "全部");
+  if (!intent?.focusTerms?.length) return values;
+  const focused = values.filter((value) =>
+    intent.focusTerms.some((term) => String(value).toLowerCase().includes(String(term).toLowerCase()) || String(value).includes(term))
+  );
+  return focused.length ? focused : values;
+}
+
+function aiBuildTimingProjectCompareContext(baseProject, compareProject, dates, requestedCountries, intent) {
+  if (!intent?.wantsNotification) return null;
+  const countries = requestedCountries?.length ? uniqueArray(requestedCountries) : ["全部"];
+  const analysisTypes = aiTimingAnalysisTypesForProjectCompare([baseProject, compareProject], dates, intent);
+  const items = countries.flatMap((country) =>
+    analysisTypes.flatMap((analysisType) =>
+      aiTimingObjectsForProjectCompare([baseProject, compareProject], dates, analysisType, country, intent)
+        .map((objectName) => aiTimingProjectCompareItem(baseProject, compareProject, dates, analysisType, objectName, country, intent))
+    )
+  ).filter((item) => item.hasData);
+  const sortedItems = items
+    .sort((a, b) => b.score - a.score || String(a.analysisType).localeCompare(String(b.analysisType), "zh-Hans-CN") || String(a.objectName).localeCompare(String(b.objectName), "zh-Hans-CN", { numeric: true }))
+    .slice(0, 16);
+  return {
+    taskType: "项目间通知文案/时机对比",
+    baseProject,
+    compareProject,
+    dates,
+    requestedCountries,
+    analysisTypes,
+    hasData: sortedItems.length > 0,
+    items: sortedItems.map((item) => ({
+      analysisType: item.analysisType,
+      objectName: item.objectName,
+      country: item.country,
+      sample: item.sample,
+      strongestChanges: item.strongestChanges,
+    })),
+    comparisonTableRows: sortedItems.flatMap((item) => item.comparisonTableRows || []).slice(0, 80),
+  };
+}
+
 function aiFeatureReportDate() {
   return sortDimensionValues("报表日期", uniqueValues(featureRows(), "报表日期")).slice(-1)[0] || "";
 }
@@ -4535,6 +4661,7 @@ function aiBuildLocalAiPrompt(context) {
 7. 如果 notificationOrTiming 有内容，且用户提到通知、推送、文案、时机、安装或卸载，必须引用专项数据。
 8. 如果 featureModules 有内容，且用户提到功能、模块、流程、首次启动或漏斗，必须引用功能模块数据。
 9. 如果 projectCompare.featureProjectCompare.hasData 为 true，且用户提到功能、模块、流程、首次启动或漏斗，必须优先回答功能模块差异；公共通知指标只能作为补充背景，不能作为主要答案。
+10. 如果 projectCompare.timingProjectCompare.hasData 为 true，且用户提到通知、推送、文案、时机、安装或卸载，必须优先回答通知文案/时机专项差异；公共通知指标只能作为补充背景，不能作为主要答案。
 
 输出要求：
 1. 用中文自然段输出，不要输出 JSON。
@@ -4961,10 +5088,19 @@ function aiBuildProjectCompareContext(analysis) {
     requestedCountries,
     analysis.intent
   );
+  const timingProjectCompare = aiBuildTimingProjectCompareContext(
+    baseProject,
+    compareProject,
+    overall.dates,
+    requestedCountries,
+    analysis.intent
+  );
   const commonMetricTableRows = [overall].concat(countryComparisons)
     .flatMap((item) => item.tableRows || [])
     .slice(0, 80);
-  const preferredTableRows = featureProjectCompare?.hasData && analysis.intent.wantsFeature
+  const preferredTableRows = timingProjectCompare?.hasData && analysis.intent.wantsNotification
+    ? timingProjectCompare.comparisonTableRows
+    : featureProjectCompare?.hasData && analysis.intent.wantsFeature
     ? featureProjectCompare.comparisonTableRows
     : commonMetricTableRows;
   return {
@@ -4982,6 +5118,7 @@ function aiBuildProjectCompareContext(analysis) {
     compareProjectBetter: overall.compareProjectBetter,
     baseProjectBetter: overall.baseProjectBetter,
     countryComparisons,
+    timingProjectCompare,
     featureProjectCompare,
     commonMetricTableRows,
     comparisonTableRows: preferredTableRows,
