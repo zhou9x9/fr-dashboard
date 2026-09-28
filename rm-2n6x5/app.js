@@ -1649,19 +1649,34 @@ function renderAll() {
   renderMenu();
   renderControls();
   const detailTitle = document.querySelector("#detail-title");
+  const trendPanel = document.querySelector("#trend-panel");
   if (state.activeMenu === MENU_OVERVIEW) {
+    if (trendPanel) {
+      trendPanel.hidden = true;
+    }
     detailTitle.textContent = "API概况";
     renderOverview();
   } else if (state.activeMenu === MENU_PLAYBACK) {
     const rows = filteredRows();
+    if (trendPanel) {
+      trendPanel.hidden = false;
+    }
+    renderChart(rows);
     detailTitle.textContent = "播放指标";
     renderPlaybackDetail(rows);
   } else if (state.activeMenu === MENU_EVENT_PARAMETER) {
     const rows = filteredRows();
+    if (trendPanel) {
+      trendPanel.hidden = true;
+    }
     detailTitle.textContent = "明细数据";
     renderEventParameterDetail(rows);
   } else {
     const rows = filteredRows();
+    if (trendPanel) {
+      trendPanel.hidden = false;
+    }
+    renderChart(rows);
     detailTitle.textContent = "明细数据";
     renderDetailTable(rows);
   }
