@@ -3,8 +3,10 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import shutil
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -13,6 +15,8 @@ TIMING_CSV_PATH = Path("/Users/macseven1seven/Downloads/FR07_FR08_feishu_timing_
 OUTPUT_PATH = BASE_DIR / "data.js"
 TIMING_OUTPUT_PATH = BASE_DIR / "timing_data.js"
 FEATURE_OUTPUT_PATH = BASE_DIR / "feature_data.js"
+CHUNK_DIR_NAME = "data_chunks"
+MAX_CHUNK_BYTES = 20_000_000
 
 MAIN_DIMENSIONS = ["报表日期", "项目代号", "首次访问日期", "国家", "广告组", "版本号"]
 TIMING_DIMENSIONS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号", "分析类型", "通知时机"]
@@ -88,6 +92,76 @@ def parse_value(field: str, raw: str):
     if field == "新增用户数":
         return int(round(number))
     return round(number, 6)
+
+
+def json_compact(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def chunk_rows(rows: list[dict], max_bytes: int = MAX_CHUNK_BYTES) -> list[list[str]]:
+    chunks: list[list[str]] = []
+    current: list[str] = []
+    current_bytes = 2
+    for row in rows:
+        row_json = json_compact(row)
+        row_bytes = len(row_json.encode("utf-8")) + (1 if current else 0)
+        if current and current_bytes + row_bytes > max_bytes:
+            chunks.append(current)
+            current = []
+            current_bytes = 2
+            row_bytes = len(row_json.encode("utf-8"))
+        current.append(row_json)
+        current_bytes += row_bytes
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def write_section_chunks(output_dir: Path, label: str, rows: list[dict]) -> list[str]:
+    chunk_files: list[str] = []
+    chunk_dir = output_dir / CHUNK_DIR_NAME
+    chunk_dir.mkdir(parents=True, exist_ok=True)
+    for index, row_jsons in enumerate(chunk_rows(rows), start=1):
+        relative_name = f"{CHUNK_DIR_NAME}/{label}_{index:03d}.json"
+        (output_dir / relative_name).write_text(
+            "["
+            + ",".join(row_jsons)
+            + "]\n",
+            encoding="utf-8",
+        )
+        chunk_files.append(relative_name)
+    return chunk_files
+
+
+def without_rows(section: dict[str, Any]) -> dict[str, Any]:
+    slim = dict(section)
+    slim["rows"] = []
+    return slim
+
+
+def chunk_loader_js(target_path: list[str], files: list[str]) -> str:
+    return (
+        "(function(){"
+        "var root=window.FR_DASHBOARD_DATA;"
+        "window.__FR_DASHBOARD_LOAD_CHUNKS__=window.__FR_DASHBOARD_LOAD_CHUNKS__||function(path,files){"
+        "var node=window.FR_DASHBOARD_DATA;"
+        "for(var i=0;i<path.length-1;i+=1){node=node[path[i]];}"
+        "var key=path[path.length-1];"
+        "node[key]=node[key]||[];"
+        "var src=(document.currentScript&&document.currentScript.src)||'';"
+        "var match=src.match(/[?&]v=([^&]+)/);"
+        "var suffix=match?'?v='+encodeURIComponent(decodeURIComponent(match[1])):'?v='+Date.now();"
+        "files.forEach(function(file){"
+        "var xhr=new XMLHttpRequest();"
+        "xhr.open('GET','./'+file+suffix,false);"
+        "xhr.send(null);"
+        "if(xhr.status!==200&&xhr.status!==0){throw new Error('Failed to load dashboard chunk: '+file);}"
+        "node[key]=node[key].concat(JSON.parse(xhr.responseText));"
+        "});"
+        "};"
+        f"window.__FR_DASHBOARD_LOAD_CHUNKS__({json_compact(target_path)},{json_compact(files)});"
+        "})();\n"
+    )
 
 
 def read_csv_rows(path: Path, rename_map: dict[str, str] | None = None) -> tuple[list[str], list[dict]]:
@@ -258,18 +332,39 @@ def main():
     payload = build_payload(args.common, args.timing, args.feature, sync_status)
     timing_payload = payload.pop("timing")
     feature_payload = payload.pop("feature")
+    chunk_dir = args.output.parent / CHUNK_DIR_NAME
+    if chunk_dir.exists():
+        shutil.rmtree(chunk_dir)
+    main_rows = payload["main"].get("rows", [])
+    timing_rows = timing_payload.get("rows", [])
+    feature_rows = feature_payload.get("rows", [])
+    main_chunks = write_section_chunks(args.output.parent, "main", main_rows)
+    timing_chunks = write_section_chunks(args.output.parent, "timing", timing_rows)
+    feature_chunks = write_section_chunks(args.output.parent, "feature", feature_rows)
+    payload["main"] = without_rows(payload["main"])
+    timing_payload = without_rows(timing_payload)
+    feature_payload = without_rows(feature_payload)
     args.output.write_text(
-        "window.FR_DASHBOARD_DATA = " + json.dumps(payload, ensure_ascii=False) + ";\n",
+        "window.FR_DASHBOARD_DATA = "
+        + json_compact(payload)
+        + ";\n"
+        + chunk_loader_js(["main", "rows"], main_chunks),
         encoding="utf-8",
     )
     timing_output = args.output.with_name("timing_data.js")
     feature_output = args.output.with_name("feature_data.js")
     timing_output.write_text(
-        "window.FR_DASHBOARD_DATA.timing = " + json.dumps(timing_payload, ensure_ascii=False) + ";\n",
+        "window.FR_DASHBOARD_DATA.timing = "
+        + json_compact(timing_payload)
+        + ";\n"
+        + chunk_loader_js(["timing", "rows"], timing_chunks),
         encoding="utf-8",
     )
     feature_output.write_text(
-        "window.FR_DASHBOARD_DATA.feature = " + json.dumps(feature_payload, ensure_ascii=False) + ";\n",
+        "window.FR_DASHBOARD_DATA.feature = "
+        + json_compact(feature_payload)
+        + ";\n"
+        + chunk_loader_js(["feature", "rows"], feature_chunks),
         encoding="utf-8",
     )
     print(f"wrote {args.output}")
