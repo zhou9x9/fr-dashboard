@@ -399,6 +399,7 @@ def collect_csv_paths(
     recent_report_days: int | None = None,
     include_report_dates: set[str] | None = None,
     project_recent_report_days: dict[str, int] | None = None,
+    max_report_dates: int | None = None,
 ) -> list[Path]:
     if input_dir.is_file():
         return [input_dir]
@@ -458,6 +459,14 @@ def collect_csv_paths(
                 for report_date in project_dates
                 if (project_code, report_date) in latest_by_project_date
             )
+
+        if max_report_dates and max_report_dates > 0:
+            selected_dates = sorted({report_date for _, report_date in selected_keys}, reverse=True)[:max_report_dates]
+            selected_keys = {
+                key
+                for key in selected_keys
+                if key[1] in selected_dates
+            }
 
         return sorted(
             [
@@ -636,6 +645,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--recent-report-days", type=int, default=None, help="Read latest files for the most recent N report dates.")
     parser.add_argument("--include-report-dates", default="", help="Comma-separated report dates to always include.")
     parser.add_argument("--project-recent-report-days", default="", help="Comma-separated project:days rules, such as RM09B:5.")
+    parser.add_argument("--max-report-dates", type=int, default=None, help="Keep at most N report dates after all selection rules.")
     parser.add_argument("--sync-status-json", default="", help="JSON sync status to embed in generated data.js.")
     return parser.parse_args()
 
@@ -664,6 +674,7 @@ def main() -> None:
         args.recent_report_days,
         include_report_dates,
         project_recent_report_days,
+        args.max_report_dates,
     )
     if not csv_paths:
         raise FileNotFoundError(f"No CSV files matched {args.glob!r} under {args.input_dir}")
@@ -674,6 +685,7 @@ def main() -> None:
         args.recent_report_days,
         include_report_dates,
         project_recent_report_days,
+        args.max_report_dates,
     )
     playback_paths = collect_csv_paths(
         args.input_dir,
@@ -682,6 +694,7 @@ def main() -> None:
         args.recent_report_days,
         include_report_dates,
         project_recent_report_days,
+        args.max_report_dates,
     )
 
     payload = build_payload(csv_paths)
