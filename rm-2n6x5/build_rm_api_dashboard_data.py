@@ -400,6 +400,7 @@ def collect_csv_paths(
     include_report_dates: set[str] | None = None,
     project_recent_report_days: dict[str, int] | None = None,
     max_report_dates: int | None = None,
+    min_report_date: str | None = None,
 ) -> list[Path]:
     if input_dir.is_file():
         return [input_dir]
@@ -417,6 +418,8 @@ def collect_csv_paths(
         for path in paths:
             report_date = report_date_from_path(path)
             if not report_date:
+                continue
+            if min_report_date and report_date < min_report_date:
                 continue
             project_code = project_code_from_path(path) or "__unknown__"
             key = (project_code, report_date)
@@ -646,6 +649,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--include-report-dates", default="", help="Comma-separated report dates to always include.")
     parser.add_argument("--project-recent-report-days", default="", help="Comma-separated project:days rules, such as RM09B:5.")
     parser.add_argument("--max-report-dates", type=int, default=None, help="Keep at most N report dates after all selection rules.")
+    parser.add_argument("--min-report-date", default="", help="Ignore files before this report date, in YYYY-MM-DD.")
     parser.add_argument("--sync-status-json", default="", help="JSON sync status to embed in generated data.js.")
     return parser.parse_args()
 
@@ -667,6 +671,7 @@ def main() -> None:
     args = parse_args()
     include_report_dates = {item.strip() for item in args.include_report_dates.split(",") if item.strip()}
     project_recent_report_days = parse_project_recent_report_days(args.project_recent_report_days)
+    min_report_date = args.min_report_date.strip() or None
     csv_paths = collect_csv_paths(
         args.input_dir,
         args.glob,
@@ -675,6 +680,7 @@ def main() -> None:
         include_report_dates,
         project_recent_report_days,
         args.max_report_dates,
+        min_report_date,
     )
     if not csv_paths:
         raise FileNotFoundError(f"No CSV files matched {args.glob!r} under {args.input_dir}")
@@ -686,6 +692,7 @@ def main() -> None:
         include_report_dates,
         project_recent_report_days,
         args.max_report_dates,
+        min_report_date,
     )
     playback_paths = collect_csv_paths(
         args.input_dir,
@@ -695,6 +702,7 @@ def main() -> None:
         include_report_dates,
         project_recent_report_days,
         args.max_report_dates,
+        min_report_date,
     )
 
     payload = build_payload(csv_paths)

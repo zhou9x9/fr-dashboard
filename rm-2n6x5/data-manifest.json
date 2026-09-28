@@ -4,21 +4,7 @@
       "rows"
     ],
     "file": "data_chunks/api_001.js",
-    "rows": 173791
-  },
-  {
-    "target": [
-      "rows"
-    ],
-    "file": "data_chunks/api_002.js",
-    "rows": 174799
-  },
-  {
-    "target": [
-      "rows"
-    ],
-    "file": "data_chunks/api_003.js",
-    "rows": 36786
+    "rows": 48733
   },
   {
     "target": [
@@ -26,7 +12,7 @@
       "rows"
     ],
     "file": "data_chunks/event_parameter_001.js",
-    "rows": 121472
+    "rows": 124096
   },
   {
     "target": [
@@ -34,87 +20,7 @@
       "rows"
     ],
     "file": "data_chunks/event_parameter_002.js",
-    "rows": 122626
-  },
-  {
-    "target": [
-      "eventParameter",
-      "rows"
-    ],
-    "file": "data_chunks/event_parameter_003.js",
-    "rows": 119274
-  },
-  {
-    "target": [
-      "eventParameter",
-      "rows"
-    ],
-    "file": "data_chunks/event_parameter_004.js",
-    "rows": 119992
-  },
-  {
-    "target": [
-      "eventParameter",
-      "rows"
-    ],
-    "file": "data_chunks/event_parameter_005.js",
-    "rows": 121675
-  },
-  {
-    "target": [
-      "eventParameter",
-      "rows"
-    ],
-    "file": "data_chunks/event_parameter_006.js",
-    "rows": 122509
-  },
-  {
-    "target": [
-      "eventParameter",
-      "rows"
-    ],
-    "file": "data_chunks/event_parameter_007.js",
-    "rows": 122596
-  },
-  {
-    "target": [
-      "eventParameter",
-      "rows"
-    ],
-    "file": "data_chunks/event_parameter_008.js",
-    "rows": 120771
-  },
-  {
-    "target": [
-      "eventParameter",
-      "rows"
-    ],
-    "file": "data_chunks/event_parameter_009.js",
-    "rows": 119946
-  },
-  {
-    "target": [
-      "eventParameter",
-      "rows"
-    ],
-    "file": "data_chunks/event_parameter_010.js",
-    "rows": 118638
-  },
-  {
-    "target": [
-      "eventParameter",
-      "rows"
-    ],
-    "file": "data_chunks/event_parameter_011.js",
-    "rows": 124784
-  },
-  {
-    "target": [
-      "eventParameter",
-      "rows"
-    ],
-    "file": "data_chunks/event_parameter_012.js",
-    "rows": 70690
+    "rows": 20801
   },
   {
     "target": [
@@ -122,6 +28,6 @@
       "rows"
     ],
     "file": "data_chunks/playback_001.js",
-    "rows": 5444
+    "rows": 653
   }
 ]
