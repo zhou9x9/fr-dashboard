@@ -4,6 +4,7 @@ import argparse
 import csv
 import json
 import re
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,10 @@ DEFAULT_OUTPUT = Path("rm_api_dashboard") / "data.js"
 DEFAULT_GLOB = "RM*_api_d0_*.csv"
 DEFAULT_EVENT_PARAMETER_GLOB = "RM*_event_parameter_*.csv"
 DEFAULT_PLAYBACK_GLOB = "RM*_playback*.csv"
+CHUNK_DIR_NAME = "data_chunks"
+CHUNK_LOADER_NAME = "data-chunks.js"
+CHUNK_MANIFEST_NAME = "data-manifest.json"
+MAX_CHUNK_BYTES = 20_000_000
 
 DIMENSIONS = ["报表日期", "项目代号", "首次访问日期", "国家", "版本号", "API", "type"]
 SPLIT_DIMENSIONS = ["首次访问日期", "国家", "版本号", "type", "报表日期", "项目代号"]
@@ -285,6 +290,102 @@ def playback_row_key(row: dict[str, Any], fields: list[str]) -> tuple[Any, ...]:
 
 def compact_rows(rows: list[dict[str, Any]], fields: list[str]) -> list[list[Any]]:
     return [[row.get(field) for field in fields] for row in rows]
+
+
+def json_compact(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def chunk_rows(rows: list[list[Any]], max_bytes: int = MAX_CHUNK_BYTES) -> list[list[str]]:
+    chunks: list[list[str]] = []
+    current: list[str] = []
+    current_bytes = 2
+    for row in rows:
+        row_json = json_compact(row)
+        row_bytes = len(row_json.encode("utf-8")) + (1 if current else 0)
+        if current and current_bytes + row_bytes > max_bytes:
+            chunks.append(current)
+            current = []
+            current_bytes = 2
+            row_bytes = len(row_json.encode("utf-8"))
+        current.append(row_json)
+        current_bytes += row_bytes
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def payload_without_rows(payload: dict[str, Any]) -> dict[str, Any]:
+    slim = dict(payload)
+    slim["rows"] = []
+    if isinstance(payload.get("eventParameter"), dict):
+        slim["eventParameter"] = dict(payload["eventParameter"])
+        slim["eventParameter"]["rows"] = []
+    if isinstance(payload.get("playback"), dict):
+        slim["playback"] = dict(payload["playback"])
+        slim["playback"]["rows"] = []
+    return slim
+
+
+def write_chunked_dashboard_data(output_path: Path, payload: dict[str, Any]) -> None:
+    output_dir = output_path.parent
+    chunk_dir = output_dir / CHUNK_DIR_NAME
+    loader_path = output_dir / CHUNK_LOADER_NAME
+    manifest_path = output_dir / CHUNK_MANIFEST_NAME
+
+    if chunk_dir.exists():
+        shutil.rmtree(chunk_dir)
+    chunk_dir.mkdir(parents=True, exist_ok=True)
+
+    output_path.write_text(
+        "window.RM_API_DASHBOARD_DATA = "
+        + json_compact(payload_without_rows(payload))
+        + ";\n"
+        + "window.__RM_API_DASHBOARD_CHUNK__ = function(path, rows) {"
+        + "var node = window.RM_API_DASHBOARD_DATA;"
+        + "for (var i = 0; i < path.length - 1; i += 1) { node = node[path[i]]; }"
+        + "var key = path[path.length - 1];"
+        + "node[key] = (node[key] || []).concat(rows);"
+        + "};\n",
+        encoding="utf-8",
+    )
+
+    chunk_specs = [
+        ("api", ["rows"], payload.get("rows") or []),
+        ("event_parameter", ["eventParameter", "rows"], (payload.get("eventParameter") or {}).get("rows") or []),
+        ("playback", ["playback", "rows"], (payload.get("playback") or {}).get("rows") or []),
+    ]
+
+    manifest: list[dict[str, Any]] = []
+    chunk_files: list[str] = []
+    for label, target, rows in chunk_specs:
+        for index, row_jsons in enumerate(chunk_rows(rows), start=1):
+            relative_name = f"{CHUNK_DIR_NAME}/{label}_{index:03d}.js"
+            chunk_path = output_dir / relative_name
+            chunk_path.write_text(
+                "window.__RM_API_DASHBOARD_CHUNK__("
+                + json_compact(target)
+                + ",["
+                + ",".join(row_jsons)
+                + "]);\n",
+                encoding="utf-8",
+            )
+            chunk_files.append(relative_name)
+            manifest.append({"target": target, "file": relative_name, "rows": len(row_jsons)})
+
+    loader_path.write_text(
+        "(function(){\n"
+        "  var src = (document.currentScript && document.currentScript.src) || '';\n"
+        "  var match = src.match(/[?&]v=([^&]+)/);\n"
+        "  var version = match ? decodeURIComponent(match[1]) : String(Date.now());\n"
+        f"  var files = {json_compact(chunk_files)};\n"
+        "  document.write(files.map(function(file) {\n"
+        "    return '<script src=\"./' + file + '?v=' + encodeURIComponent(version) + '\"><\\/script>';\n"
+        "  }).join(''));\n"
+        "})();\n",
+        encoding="utf-8",
+    )
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def latest_path_key(path: Path) -> tuple[str, float, str]:
@@ -603,12 +704,7 @@ def main() -> None:
     if args.sync_status_json:
         payload["syncStatus"] = json.loads(args.sync_status_json)
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(
-        "window.RM_API_DASHBOARD_DATA = "
-        + json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-        + ";\n",
-        encoding="utf-8",
-    )
+    write_chunked_dashboard_data(args.output, payload)
     print(
         f"wrote {args.output} with {len(payload['rows'])} API rows, "
         f"{len(payload['eventParameter']['rows'])} event parameter rows, "

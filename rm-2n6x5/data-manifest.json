@@ -1,0 +1,49 @@
+[
+  {
+    "target": [
+      "rows"
+    ],
+    "file": "data_chunks/api_001.js",
+    "rows": 101077
+  },
+  {
+    "target": [
+      "eventParameter",
+      "rows"
+    ],
+    "file": "data_chunks/event_parameter_001.js",
+    "rows": 125444
+  },
+  {
+    "target": [
+      "eventParameter",
+      "rows"
+    ],
+    "file": "data_chunks/event_parameter_002.js",
+    "rows": 126580
+  },
+  {
+    "target": [
+      "eventParameter",
+      "rows"
+    ],
+    "file": "data_chunks/event_parameter_003.js",
+    "rows": 124367
+  },
+  {
+    "target": [
+      "eventParameter",
+      "rows"
+    ],
+    "file": "data_chunks/event_parameter_004.js",
+    "rows": 34293
+  },
+  {
+    "target": [
+      "playback",
+      "rows"
+    ],
+    "file": "data_chunks/playback_001.js",
+    "rows": 1430
+  }
+]
