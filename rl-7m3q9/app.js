@@ -2117,8 +2117,18 @@ function aiTimingObjectMatchesQuestion(text, objectName) {
   return focusWords.some((word) => word.length >= 2 && objectText.includes(word));
 }
 
+function aiLatestTimingReportDate() {
+  return sortDimensionValues("报表日期", uniqueValues(dashboardData.timing.rows, "报表日期")).slice(-1)[0] || "";
+}
+
+function aiTimingObjectUserWeight(rows, objectName) {
+  return rows
+    .filter((row) => row["通知时机"] === objectName)
+    .reduce((sum, row) => sum + Number(row["新增用户数"] || 0), 0);
+}
+
 function aiTimingProjectRows({ project, country, dates, analysisType, objectName }) {
-  const latestReportDate = sortDimensionValues("报表日期", uniqueValues(dashboardData.timing.rows, "报表日期")).slice(-1)[0] || "";
+  const latestReportDate = aiLatestTimingReportDate();
   let rows = dashboardData.timing.rows.filter((row) =>
     row["项目代号"] === project &&
     dates.includes(row["首次访问日期"]) &&
@@ -2131,6 +2141,19 @@ function aiTimingProjectRows({ project, country, dates, analysisType, objectName
     rows = rows.filter((row) => row["版本号"] === "全部");
   }
   return rows;
+}
+
+function aiTimingVersionRows({ project, version, country, dates, analysisType, objectName }) {
+  const latestReportDate = aiLatestTimingReportDate();
+  return dashboardData.timing.rows.filter((row) =>
+    row["项目代号"] === project &&
+    row["版本号"] === version &&
+    dates.includes(row["首次访问日期"]) &&
+    (!latestReportDate || row["报表日期"] === latestReportDate) &&
+    (!country || country === "全部" || row["国家"] === country) &&
+    (!analysisType || !row["分析类型"] || row["分析类型"] === analysisType) &&
+    (!objectName || row["通知时机"] === objectName)
+  );
 }
 
 function aiTimingProjectCompareRows(baseProject, compareProject, country, dates, question) {
@@ -2149,7 +2172,7 @@ function aiTimingProjectCompareRows(baseProject, compareProject, country, dates,
     );
     let objects = uniqueValues(sourceRows, "通知时机").filter((item) => item && item !== "全部");
     const focusedObjects = objects.filter((item) => aiTimingObjectMatchesQuestion(question, item));
-    objects = (focusedObjects.length ? focusedObjects : objects).slice(0, 8);
+    objects = (focusedObjects.length ? focusedObjects : objects.sort((a, b) => aiTimingObjectUserWeight(sourceRows, b) - aiTimingObjectUserWeight(sourceRows, a))).slice(0, 8);
     objects.forEach((objectName) => {
       const baseAgg = aggregateRows(aiTimingProjectRows({ project: baseProject, country, dates, analysisType, objectName }), metrics) || {};
       const compareAgg = aggregateRows(aiTimingProjectRows({ project: compareProject, country, dates, analysisType, objectName }), metrics) || {};
@@ -2161,6 +2184,50 @@ function aiTimingProjectCompareRows(baseProject, compareProject, country, dates,
             analysisType,
             object: objectName,
             ...item,
+            metricName: metric,
+            metric: `${analysisType}-${objectName}-${metric}`,
+          });
+        }
+      });
+    });
+  });
+  return tableRows
+    .sort((a, b) => b.magnitude - a.magnitude)
+    .slice(0, 80);
+}
+
+function aiTimingVersionCompareRows(project, baseVersion, compareVersion, country, dates, question) {
+  if (!/通知|推送|文案|时机|安装|卸载/i.test(question)) return [];
+  const metrics = DEFAULT_TIMING_METRICS.filter((metric) => dashboardData.timing.metrics.includes(metric));
+  const analysisTypes = aiTimingRequestedAnalysisTypes(question).filter((type) =>
+    dashboardData.timing.rows.some((row) => row["分析类型"] === type)
+  );
+  const latestReportDate = aiLatestTimingReportDate();
+  const tableRows = [];
+  analysisTypes.forEach((analysisType) => {
+    const sourceRows = dashboardData.timing.rows.filter((row) =>
+      row["项目代号"] === project &&
+      [baseVersion, compareVersion].includes(row["版本号"]) &&
+      dates.includes(row["首次访问日期"]) &&
+      (!latestReportDate || row["报表日期"] === latestReportDate) &&
+      (!country || country === "全部" || row["国家"] === country) &&
+      (!row["分析类型"] || row["分析类型"] === analysisType)
+    );
+    let objects = uniqueValues(sourceRows, "通知时机").filter((item) => item && item !== "全部");
+    const focusedObjects = objects.filter((item) => aiTimingObjectMatchesQuestion(question, item));
+    objects = (focusedObjects.length ? focusedObjects : objects.sort((a, b) => aiTimingObjectUserWeight(sourceRows, b) - aiTimingObjectUserWeight(sourceRows, a))).slice(0, 8);
+    objects.forEach((objectName) => {
+      const baseAgg = aggregateRows(aiTimingVersionRows({ project, version: baseVersion, country, dates, analysisType, objectName }), metrics) || {};
+      const compareAgg = aggregateRows(aiTimingVersionRows({ project, version: compareVersion, country, dates, analysisType, objectName }), metrics) || {};
+      metrics.forEach((metric) => {
+        const item = aiChange(metric, baseAgg[metric], compareAgg[metric], baseVersion, compareVersion);
+        if (item) {
+          tableRows.push({
+            range: country || "全部",
+            analysisType,
+            object: objectName,
+            ...item,
+            metricName: metric,
             metric: `${analysisType}-${objectName}-${metric}`,
           });
         }
@@ -2213,7 +2280,20 @@ function aiBuildRlContext() {
     const item = aiChange(metric, baseAgg[metric], compareAgg[metric], baseVersion, compareVersion);
     if (item) tableRows.push({ range: country, ...item });
   });
-  return { taskType: "版本对比", question, dates, country, project, baseObject: baseVersion, compareObject: compareVersion, metrics, tableRows };
+  const timingDetailTableRows = aiTimingVersionCompareRows(project, baseVersion, compareVersion, country, dates, question);
+  return {
+    taskType: "版本对比",
+    question,
+    dates,
+    country,
+    project,
+    baseObject: baseVersion,
+    compareObject: compareVersion,
+    metrics,
+    commonMetricTableRows: tableRows,
+    timingDetailTableRows,
+    tableRows: timingDetailTableRows.length ? timingDetailTableRows : tableRows,
+  };
 }
 
 function aiLocalKey(context) {
@@ -2313,11 +2393,12 @@ async function aiRunRlDeepSeek(context, requestKey) {
   const prompt = `你是 RL 看板里的中文业务数据分析助手。只根据 JSON 数据回答，不要编造。
 要求：
 1. 先用一句话直接回答用户问题。
-2. 如果 tableRows 有内容，必须先输出 Markdown 表格，列为：范围、指标、${context.baseObject}、${context.compareObject}、差值、判断。
-3. 然后分“主要差异”“重点风险”“建议动作”三段，每段最多 3 条。
-4. 新增用户数只作为样本背景，不判断好坏。
-5. 卸载率越低越好；留存、授权、展示、点击和人均次数通常越高越好。
-6. 如果 timingDetailTableRows 有内容，说明用户要看通知文案/通知时机专项差异，必须优先解释这些专项行；commonMetricTableRows 只能作为整体背景。
+2. 如果 timingDetailTableRows 有内容，说明 JSON 已经提供通知文案/通知时机专项明细，绝对不要说“当前 JSON 未提供通知时机/文案专项明细”。必须先输出 Markdown 表格，列为：范围、专项、对象、指标、${context.baseObject}、${context.compareObject}、差值、判断。
+3. 如果 tableRows 有内容但 timingDetailTableRows 为空，必须先输出 Markdown 表格，列为：范围、指标、${context.baseObject}、${context.compareObject}、差值、判断。
+4. 然后分“主要差异”“重点风险”“建议动作”三段，每段最多 3 条。
+5. 新增用户数只作为样本背景，不判断好坏。
+6. 卸载率越低越好；留存、授权、展示、点击和人均次数通常越高越好。
+7. 如果 timingDetailTableRows 有内容，必须优先解释这些专项行；commonMetricTableRows 只能作为整体通知指标背景。
 
 JSON：
 ${JSON.stringify(context)}`;
