@@ -4,7 +4,7 @@
       "rows"
     ],
     "file": "data_chunks/api_001.js",
-    "rows": 48733
+    "rows": 106817
   },
   {
     "target": [
@@ -20,7 +20,15 @@
       "rows"
     ],
     "file": "data_chunks/event_parameter_002.js",
-    "rows": 20801
+    "rows": 123204
+  },
+  {
+    "target": [
+      "eventParameter",
+      "rows"
+    ],
+    "file": "data_chunks/event_parameter_003.js",
+    "rows": 42494
   },
   {
     "target": [
@@ -28,6 +36,6 @@
       "rows"
     ],
     "file": "data_chunks/playback_001.js",
-    "rows": 653
+    "rows": 1360
   }
 ]
