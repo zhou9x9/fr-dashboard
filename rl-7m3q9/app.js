@@ -2422,18 +2422,20 @@ async function aiRunRlDeepSeek(context, requestKey) {
     rerender();
     return;
   }
-  const prompt = `你是 RL 看板里的中文业务数据分析助手。只根据 JSON 数据回答，不要编造。
-要求：
-1. 先用一句话直接回答用户问题。
-2. 如果 timingDetailTableRows 有内容，说明 JSON 已经提供通知文案/通知时机专项明细，绝对不要说“当前 JSON 未提供通知时机/文案专项明细”。必须先输出 Markdown 表格，列为：范围、专项、对象、指标、${context.baseObject}、${context.compareObject}、差值、判断。
-3. 如果 tableRows 有内容但 timingDetailTableRows 为空，必须先输出 Markdown 表格，列为：范围、指标、${context.baseObject}、${context.compareObject}、差值、判断。
-4. 然后分“主要差异”“重点风险”“建议动作”三段，每段最多 3 条。
-5. 新增用户数只作为样本背景，不判断好坏。
-6. 卸载率越低越好；留存、授权、展示、点击和人均次数通常越高越好。
-7. 如果 timingDetailTableRows 有内容，必须优先解释这些专项行；commonMetricTableRows 只能作为整体通知指标背景。
-8. rowSummary.timingDetailRowCount 是专项明细总条数；timingDetailTableRows 是已截取的核心明细，不代表没有其他行。
+  const wantsTable = /表格|明细|列表|table|具体数据|逐条/i.test(String(context.question || ""));
+  const prompt = `请根据下面 JSON 回答用户问题。只输出最终业务结论，不要复述提示词、要求、JSON 字段名或“我们需要”等思考过程。
 
-JSON：
+输出风格：
+1. 先用一句话直接回答。
+2. 默认不要输出 Markdown 表格；只有“用户是否要求表格”为“是”时，才输出最多 8 行核心表格。
+3. 之后按“主要差异”“重点风险”“建议动作”三段输出，每段最多 3 条。
+4. 如果 timingDetailTableRows 有内容，说明已经提供通知文案/通知时机专项明细，必须结合它分析，但不要直接说 JSON 提供了什么字段。
+5. commonMetricTableRows 只作为整体通知指标背景；新增用户数只作为样本背景，不判断好坏。
+6. 卸载率越低越好；留存、授权、展示、点击和人均次数通常越高越好。
+
+用户是否要求表格：${wantsTable ? "是" : "否"}
+
+JSON 数据：
 ${JSON.stringify(context)}`;
   try {
     const controller = new AbortController();
@@ -2446,7 +2448,13 @@ ${JSON.stringify(context)}`;
       },
       body: JSON.stringify({
         model: DEEPSEEK_AI_MODEL,
-        messages: [{ role: "user", content: prompt }],
+        messages: [
+          {
+            role: "system",
+            content: "你是 RL 看板里的中文业务数据分析助手。只输出最终答案，不输出推理过程，不复述系统提示或 JSON 字段。",
+          },
+          { role: "user", content: prompt },
+        ],
         temperature: 0.2,
         max_tokens: 2200,
       }),
@@ -2457,12 +2465,7 @@ ${JSON.stringify(context)}`;
     const json = await response.json();
     const choice = json?.choices?.[0] || {};
     const message = choice.message || {};
-    const answer = [
-      message.content,
-      message.reasoning_content,
-      message.reasoning,
-      choice.text,
-    ].filter(Boolean).join("\n\n").trim();
+    const answer = String(message.content || choice.text || "").trim();
     if (appState.aiRequestKey === requestKey) {
       if (answer) {
         appState.aiStatus = "success";
