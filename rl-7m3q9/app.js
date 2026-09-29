@@ -2239,6 +2239,22 @@ function aiTimingVersionCompareRows(project, baseVersion, compareVersion, countr
     .slice(0, 80);
 }
 
+function aiCompactAiRows(rows, limit = 40) {
+  return (rows || []).slice(0, limit).map((row) => {
+    const compact = {
+      range: row.range,
+      metric: row.metricName || row.metric,
+      baseValue: row.baseValue,
+      compareValue: row.compareValue,
+      delta: row.delta,
+      judgment: row.judgment,
+    };
+    if (row.analysisType) compact.analysisType = row.analysisType;
+    if (row.object) compact.object = row.object;
+    return compact;
+  });
+}
+
 function aiBuildRlContext() {
   const question = String(appState.aiText || "").trim();
   const projects = aiMentionedValues(question, aiOptions("项目代号"), "项目代号");
@@ -2261,6 +2277,8 @@ function aiBuildRlContext() {
       if (item) tableRows.push({ range: country, ...item });
     });
     const timingDetailTableRows = aiTimingProjectCompareRows(baseProject, compareProject, country, dates, question);
+    const compactTimingRows = aiCompactAiRows(timingDetailTableRows, 40);
+    const compactCommonRows = aiCompactAiRows(tableRows, 30);
     return {
       taskType: "项目间对比",
       question,
@@ -2269,9 +2287,15 @@ function aiBuildRlContext() {
       baseObject: baseProject,
       compareObject: compareProject,
       metrics,
-      commonMetricTableRows: tableRows,
-      timingDetailTableRows,
-      tableRows: timingDetailTableRows.length ? timingDetailTableRows : tableRows,
+      rowSummary: {
+        commonMetricRowCount: tableRows.length,
+        timingDetailRowCount: timingDetailTableRows.length,
+        timingDetailRowsShown: compactTimingRows.length,
+        note: "timingDetailTableRows 已按变化幅度截取前 40 条，完整排序由看板代码计算。",
+      },
+      commonMetricTableRows: compactCommonRows,
+      timingDetailTableRows: compactTimingRows,
+      tableRows: compactTimingRows.length ? compactTimingRows : compactCommonRows,
     };
   }
   const baseAgg = aggregateRows(aiFilteredRows({ project, version: baseVersion, country, dates }), metrics) || {};
@@ -2281,6 +2305,8 @@ function aiBuildRlContext() {
     if (item) tableRows.push({ range: country, ...item });
   });
   const timingDetailTableRows = aiTimingVersionCompareRows(project, baseVersion, compareVersion, country, dates, question);
+  const compactTimingRows = aiCompactAiRows(timingDetailTableRows, 40);
+  const compactCommonRows = aiCompactAiRows(tableRows, 30);
   return {
     taskType: "版本对比",
     question,
@@ -2290,9 +2316,15 @@ function aiBuildRlContext() {
     baseObject: baseVersion,
     compareObject: compareVersion,
     metrics,
-    commonMetricTableRows: tableRows,
-    timingDetailTableRows,
-    tableRows: timingDetailTableRows.length ? timingDetailTableRows : tableRows,
+    rowSummary: {
+      commonMetricRowCount: tableRows.length,
+      timingDetailRowCount: timingDetailTableRows.length,
+      timingDetailRowsShown: compactTimingRows.length,
+      note: "timingDetailTableRows 已按变化幅度截取前 40 条，完整排序由看板代码计算。",
+    },
+    commonMetricTableRows: compactCommonRows,
+    timingDetailTableRows: compactTimingRows,
+    tableRows: compactTimingRows.length ? compactTimingRows : compactCommonRows,
   };
 }
 
@@ -2399,6 +2431,7 @@ async function aiRunRlDeepSeek(context, requestKey) {
 5. 新增用户数只作为样本背景，不判断好坏。
 6. 卸载率越低越好；留存、授权、展示、点击和人均次数通常越高越好。
 7. 如果 timingDetailTableRows 有内容，必须优先解释这些专项行；commonMetricTableRows 只能作为整体通知指标背景。
+8. rowSummary.timingDetailRowCount 是专项明细总条数；timingDetailTableRows 是已截取的核心明细，不代表没有其他行。
 
 JSON：
 ${JSON.stringify(context)}`;
@@ -2422,11 +2455,24 @@ ${JSON.stringify(context)}`;
     clearTimeout(timer);
     if (!response.ok) throw new Error(await response.text());
     const json = await response.json();
-    const answer = json?.choices?.[0]?.message?.content || "";
+    const choice = json?.choices?.[0] || {};
+    const message = choice.message || {};
+    const answer = [
+      message.content,
+      message.reasoning_content,
+      message.reasoning,
+      choice.text,
+    ].filter(Boolean).join("\n\n").trim();
     if (appState.aiRequestKey === requestKey) {
-      appState.aiStatus = "success";
-      appState.aiAnswer = answer || "DeepSeek 没有返回正文。";
-      appState.aiError = "";
+      if (answer) {
+        appState.aiStatus = "success";
+        appState.aiAnswer = answer;
+        appState.aiError = "";
+      } else {
+        appState.aiStatus = "error";
+        appState.aiAnswer = "";
+        appState.aiError = `DeepSeek 返回了空正文${choice.finish_reason ? `（${choice.finish_reason}）` : ""}。请减少日期范围后重试，或稍后再点一次分析。`;
+      }
       rerender();
     }
   } catch (error) {
