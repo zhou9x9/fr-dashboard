@@ -18,7 +18,7 @@
       "rows"
     ],
     "file": "data_chunks/api_003.js",
-    "rows": 17552
+    "rows": 98959
   },
   {
     "target": [
@@ -162,7 +162,47 @@
       "rows"
     ],
     "file": "data_chunks/event_parameter_018.js",
-    "rows": 83525
+    "rows": 115967
+  },
+  {
+    "target": [
+      "eventParameter",
+      "rows"
+    ],
+    "file": "data_chunks/event_parameter_019.js",
+    "rows": 117308
+  },
+  {
+    "target": [
+      "eventParameter",
+      "rows"
+    ],
+    "file": "data_chunks/event_parameter_020.js",
+    "rows": 116553
+  },
+  {
+    "target": [
+      "eventParameter",
+      "rows"
+    ],
+    "file": "data_chunks/event_parameter_021.js",
+    "rows": 115702
+  },
+  {
+    "target": [
+      "eventParameter",
+      "rows"
+    ],
+    "file": "data_chunks/event_parameter_022.js",
+    "rows": 114688
+  },
+  {
+    "target": [
+      "eventParameter",
+      "rows"
+    ],
+    "file": "data_chunks/event_parameter_023.js",
+    "rows": 7534
   },
   {
     "target": [
@@ -170,6 +210,6 @@
       "rows"
     ],
     "file": "data_chunks/playback_001.js",
-    "rows": 4299
+    "rows": 5253
   }
 ]

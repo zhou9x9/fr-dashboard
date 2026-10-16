@@ -94,6 +94,17 @@ PLAYBACK_DIMENSION_CANDIDATES = ["报表日期", "项目代号", "首次访问�
 PLAYBACK_RATE_HINTS = ("rate", "ratio", "percent", "pct")
 
 
+def memory_efficient_sort(
+    rows: Any,
+    fields: list[str],
+) -> list[dict[str, Any]]:
+    """Sort by multiple fields without allocating one large tuple per row."""
+    ordered_rows = list(rows)
+    for field in reversed(fields):
+        ordered_rows.sort(key=lambda row, field=field: str(row.get(field) or ""))
+    return ordered_rows
+
+
 def parse_rate(raw: Any) -> float | None:
     value = str(raw or "").strip().replace(",", "")
     if not value:
@@ -502,18 +513,7 @@ def build_payload(csv_paths: list[Path]) -> dict[str, Any]:
                 continue
             deduped[row_key(row)] = row
 
-    rows = sorted(
-        deduped.values(),
-        key=lambda row: (
-            str(row.get("报表日期") or ""),
-            str(row.get("项目代号") or ""),
-            str(row.get("首次访问日期") or ""),
-            str(row.get("国家") or ""),
-            str(row.get("版本号") or ""),
-            str(row.get("API") or ""),
-            str(row.get("type") or ""),
-        ),
-    )
+    rows = memory_efficient_sort(deduped.values(), DIMENSIONS)
 
     return {
         "generatedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -540,22 +540,9 @@ def build_event_parameter_payload(csv_paths: list[Path]) -> dict[str, Any]:
         for row in read_event_parameter_rows(path):
             deduped[event_parameter_row_key(row)] = row
 
-    rows = sorted(
+    rows = memory_efficient_sort(
         deduped.values(),
-        key=lambda row: (
-            str(row.get("报表日期") or ""),
-            str(row.get("项目代号") or ""),
-            str(row.get("首次访问日期") or ""),
-            str(row.get("国家") or ""),
-            str(row.get("版本号") or ""),
-            str(row.get("事件名") or ""),
-            str(row.get("type") or ""),
-            str(row.get("api") or ""),
-            str(row.get("reason") or ""),
-            str(row.get("message") or ""),
-            str(row.get("status") or ""),
-            str(row.get("detail") or ""),
-        ),
+        EVENT_PARAMETER_DIMENSIONS + [item["key"] for item in EVENT_PARAMETER_FIELDS],
     )
 
     return {
@@ -620,10 +607,7 @@ def build_playback_payload(csv_paths: list[Path]) -> dict[str, Any]:
     for row in raw_rows:
         deduped[playback_row_key(row, all_fields)] = row
 
-    rows = sorted(
-        deduped.values(),
-        key=lambda row: tuple(str(row.get(field) or "") for field in dimensions),
-    )
+    rows = memory_efficient_sort(deduped.values(), dimensions)
 
     return {
         "sourceFiles": source_files,
