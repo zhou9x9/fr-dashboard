@@ -239,6 +239,7 @@ def build_payload(
     timing_csv_path: Path,
     feature_csv_path: Path | None = None,
     sync_status: dict | None = None,
+    project_prefix: str | None = None,
 ):
     main_header, main_rows = read_csv_rows(common_csv_path, rename_map=METRIC_RENAME_MAP)
     if "广告组" not in main_header:
@@ -254,6 +255,10 @@ def build_payload(
         feature_header, feature_rows = read_csv_rows(feature_csv_path, rename_map={**METRIC_RENAME_MAP, "\u7248\u672c": "\u7248\u672c\u53f7"})
     else:
         feature_header, feature_rows = [], []
+
+    validate_project_rows("common", main_rows, project_prefix)
+    validate_project_rows("timing", timing_rows, project_prefix)
+    validate_project_rows("feature", feature_rows, project_prefix)
 
     main_metrics = [name for name in main_header if name not in MAIN_DIMENSIONS]
     timing_metrics = [name for name in timing_header if name not in TIMING_DIMENSIONS]
@@ -292,6 +297,33 @@ def build_payload(
     }
 
 
+def validate_project_rows(table_name: str, rows: list[dict], project_prefix: str | None) -> None:
+    if not project_prefix or not rows:
+        return
+    normalized_prefix = project_prefix.strip().upper()
+    projects = {
+        str(row.get("项目代号") or "").strip()
+        for row in rows
+        if str(row.get("项目代号") or "").strip()
+    }
+    unexpected = sorted(
+        project for project in projects if not project.upper().startswith(normalized_prefix)
+    )
+    missing_project_rows = sum(
+        1 for row in rows if not str(row.get("项目代号") or "").strip()
+    )
+    if unexpected or missing_project_rows:
+        details = []
+        if unexpected:
+            details.append("unexpected projects=" + ",".join(unexpected))
+        if missing_project_rows:
+            details.append(f"missing project rows={missing_project_rows}")
+        raise ValueError(
+            f"Refusing to generate {normalized_prefix} dashboard {table_name} data "
+            f"({'; '.join(details)})"
+        )
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Build FR dashboard data.js from two CSV exports.")
     parser.add_argument(
@@ -323,13 +355,24 @@ def parse_args():
         default=None,
         help="JSON metadata describing expected, included, and missing projects for this refresh.",
     )
+    parser.add_argument(
+        "--project-prefix",
+        default=None,
+        help="Required project-code prefix for every generated row, for example FR or RL.",
+    )
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
     sync_status = json.loads(args.sync_status) if args.sync_status else None
-    payload = build_payload(args.common, args.timing, args.feature, sync_status)
+    payload = build_payload(
+        args.common,
+        args.timing,
+        args.feature,
+        sync_status,
+        args.project_prefix,
+    )
     timing_payload = payload.pop("timing")
     feature_payload = payload.pop("feature")
     chunk_dir = args.output.parent / CHUNK_DIR_NAME
