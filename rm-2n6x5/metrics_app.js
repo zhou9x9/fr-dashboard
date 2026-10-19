@@ -1358,7 +1358,15 @@ function renderWorkspaceChrome() {
   if (nav) {
     const allowedWorkspaceKeys = REQUESTED_VIEW === "feature"
       ? new Set(["feature_module"])
-      : new Set(["timing_special", "notification_copy"]);
+      : new Set([
+          "paid_country",
+          "country_opt",
+          "version_iteration",
+          "adgroup_iteration",
+          "cross_project",
+          "timing_special",
+          "notification_copy",
+        ]);
     nav.innerHTML = Object.entries(WORKSPACES).filter(([key, item]) => !item.hidden && allowedWorkspaceKeys.has(key)).map(([key, item]) => `
       <button type="button" class="workspace-chip ${appState.activeWorkspace === key ? "active" : ""}" data-workspace="${key}">
         ${item.label}
